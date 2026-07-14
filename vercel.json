@@ -2,7 +2,7 @@
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
   ],
-  "installCommand": "npm ci --ignore-scripts",
+  "installCommand": "npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "dist"
 }
