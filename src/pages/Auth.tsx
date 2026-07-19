@@ -1,19 +1,15 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
-import type { Role } from "@/lib/api";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import dmcLogo from "@/assets/dmc-logo.png";
 
 export default function AuthPage() {
-  const { currentUser, login, register } = useAuth();
+  const { currentUser, login } = useAuth();
   const navigate = useNavigate();
-  const [mode, setMode] = useState<"login" | "signup">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [role, setRole] = useState<Role>("Treasurer");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -24,18 +20,9 @@ export default function AuthPage() {
     e.preventDefault();
     setSubmitting(true);
     try {
-      if (mode === "login") {
-        const r = await login(email.trim(), password);
-        if (!r.ok) return toast.error(r.error ?? "Login failed");
-        toast.success("Welcome back!");
-      } else {
-        if (!name.trim() || !email.trim() || password.length < 6) {
-          return toast.error("Fill all fields (password must be at least 6 characters)");
-        }
-        const r = await register({ fullName: name.trim(), email: email.trim(), password, role });
-        if (!r.ok) return toast.error(r.error ?? "Signup failed");
-        toast.success("Account created!");
-      }
+      const r = await login(email.trim(), password);
+      if (!r.ok) return toast.error(r.error ?? "Login failed");
+      toast.success("Welcome back!");
     } finally {
       setSubmitting(false);
     }
@@ -110,32 +97,13 @@ export default function AuthPage() {
             </div>
           </div>
 
-          {/* Mode tabs */}
-          <div className="inline-flex items-center gap-1 p-1 bg-muted/60 rounded-full mb-8">
-            {(["login", "signup"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setMode(m)}
-                className={`px-4 py-1.5 rounded-full text-xs font-medium transition ${
-                  mode === m ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {m === "login" ? "Sign in" : "Create account"}
-              </button>
-            ))}
-          </div>
-
-          <h2 className="display text-3xl">{mode === "login" ? "Welcome back." : "Create your account."}</h2>
+          <div className="eyebrow mb-4">Sign in</div>
+          <h2 className="display text-3xl">Welcome back.</h2>
           <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
-            {mode === "login" ? "Sign in to manage the council funds." : "Register to start recording funds."}
+            Sign in to manage the council funds. Accounts are issued by the system administrator.
           </p>
 
           <form onSubmit={submit} className="mt-8 space-y-2">
-            {mode === "signup" && (
-              <FloatField label="Full name" value={name}>
-                <input value={name} onChange={(e) => setName(e.target.value)} />
-              </FloatField>
-            )}
             <FloatField label="Email" value={email}>
               <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
             </FloatField>
@@ -144,38 +112,15 @@ export default function AuthPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                autoComplete="current-password"
               />
             </FloatField>
 
-            {mode === "signup" && (
-              <FloatField label="Role" value={role}>
-                <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-                  <option value="Treasurer">Treasurer</option>
-                  <option value="Officer">Officer</option>
-                  <option value="ClassRepresentative">Class Representative</option>
-                  <option value="Adviser">Adviser</option>
-                </select>
-              </FloatField>
-            )}
-
             <button type="submit" disabled={submitting} className="btn btn-primary w-full mt-8">
-              {submitting ? "Please wait…" : mode === "login" ? "Sign in" : "Create account"}
+              {submitting ? "Please wait…" : "Sign in"}
               <ArrowRight className="h-4 w-4" />
             </button>
           </form>
-
-          {mode === "login" && (
-            <div className="mt-8 pt-6 hairline-t">
-              <div className="text-xs text-muted-foreground leading-relaxed">
-                Don't have an account yet? There are no pre-made accounts — you'll need to{" "}
-                <button onClick={() => setMode("signup")} className="text-emerald link-hover font-medium">
-                  register first
-                </button>
-                .
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

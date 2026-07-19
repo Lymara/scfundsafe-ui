@@ -7,6 +7,7 @@ import IncomePage from "@/pages/Income";
 import ExpensePage from "@/pages/Expenses";
 import RecordsPage from "@/pages/Records";
 import ReportsPage from "@/pages/Reports";
+import SettingsPage from "@/pages/Settings";
 
 function IndexRedirect() {
   const { currentUser, hydrated } = useAuth();
@@ -32,6 +33,7 @@ export default function App() {
           <Route path="/expenses" element={<ExpensePage />} />
           <Route path="/records" element={<RecordsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

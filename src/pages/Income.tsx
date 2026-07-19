@@ -1,12 +1,28 @@
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
+import { useAuth } from "@/lib/auth-context";
 import { api, type BalanceDto } from "@/lib/api";
 import { formatPHP } from "@/lib/auth-context";
 import { TrendingUp, ArrowRight, ArrowLeft } from "lucide-react";
 import { toast } from "sonner";
 
 export default function IncomePage() {
+  const { currentUser } = useAuth();
+  if (currentUser?.role === "Admin") {
+    return (
+      <AppLayout>
+        <div className="max-w-md text-center py-24 mx-auto">
+          <div className="eyebrow">Restricted</div>
+          <h1 className="display text-3xl mt-2">Not available for admins</h1>
+          <p className="text-muted-foreground text-sm mt-3">
+            Administrators manage accounts and audit logs — recording transactions is reserved for the treasurer.
+          </p>
+        </div>
+      </AppLayout>
+    );
+  }
+
   return (
     <AppLayout>
       <IncomeForm />

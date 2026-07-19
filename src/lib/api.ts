@@ -1,6 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_URL || "https://localhost:7050/api";
 
-export type Role = "Treasurer" | "Officer" | "ClassRepresentative" | "Adviser";
+export type Role = "Admin" | "Treasurer" | "Officer" | "ClassRepresentative" | "Adviser";
 
 export interface AuthResponse {
   userId: string;
@@ -88,6 +88,35 @@ export interface ReportDto {
   remainingBalance: number;
   recordCount: number;
   records: FundRecordDto[];
+}
+
+// ---- Admin: account management + activity log ----
+
+export interface UserListItemDto {
+  userId: string;
+  fullName: string;
+  email: string;
+  role: Role;
+}
+
+export interface CreateUserPayload {
+  fullName: string;
+  email: string;
+  password: string;
+  role: Role;
+}
+
+export interface ActivityLogDto {
+  logId: number;
+  userName: string;
+  action: string;
+  detail?: string | null;
+  createdAt: string;
+}
+
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
 }
 
 const TOKEN_KEY = "scfundsafe_token";
@@ -221,6 +250,34 @@ export const api = {
   // UC-06 Generate Reports
   getReport: (params: ReportParams) =>
     request<ReportDto | { message: string; data: ReportDto }>(`/reports${toQuery(params)}`),
+
+  // Settings: any signed-in user changes their own password
+  changePassword: (payload: ChangePasswordPayload) =>
+    request<{ message: string }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  // Admin: account management
+  getUsers: () => request<UserListItemDto[]>("/admin/users"),
+
+  createUser: (payload: CreateUserPayload) =>
+    request<{ message: string; data: UserListItemDto }>("/admin/users", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteUser: (id: string) =>
+    request<{ message: string }>(`/admin/users/${id}`, { method: "DELETE" }),
+
+  resetUserPassword: (id: string, newPassword: string) =>
+    request<{ message: string }>(`/admin/users/${id}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ newPassword }),
+    }),
+
+  // Admin: activity / audit trail
+  getActivityLogs: () => request<ActivityLogDto[]>("/admin/activity"),
 };
 
 export { ApiError };

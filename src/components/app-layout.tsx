@@ -10,6 +10,7 @@ import {
   FileBarChart,
   LogOut,
   ShieldCheck,
+  Settings as SettingsIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/api";
@@ -21,6 +22,7 @@ const nav: { to: string; label: string; icon: typeof LayoutDashboard; roles?: Ro
   { to: "/expenses", label: "Record Expense", icon: TrendingDown, roles: ["Treasurer"] },
   { to: "/records", label: "Records", icon: Search },
   { to: "/reports", label: "Reports", icon: FileBarChart },
+  { to: "/settings", label: "Settings", icon: SettingsIcon },
 ];
 
 export function AppLayout({ children }: { children: ReactNode }) {
