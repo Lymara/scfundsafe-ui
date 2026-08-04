@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { useAuth, formatPHP } from "@/lib/auth-context";
-import { api, type FundRecordDto, type UpdateRecordPayload } from "@/lib/api";
+import { api, type FundRecordDto, type UpdateRecordPayload, PAYMENT_METHODS } from "@/lib/api";
 import { Search, Pencil, X, ArrowUpRight, ArrowDownRight, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
+import { SelectPicker } from "@/components/select-picker";
+import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 
 export default function RecordsPage() {
   return (
@@ -24,6 +26,7 @@ function RecordsView() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [editing, setEditing] = useState<FundRecordDto | null>(null);
+  const [page, setPage] = useState(1);
 
   async function runSearch() {
     setLoading(true);
@@ -47,6 +50,10 @@ function RecordsView() {
     const timeout = setTimeout(runSearch, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, type, from, to]);
+
+  useEffect(() => {
+    setPage(1);
   }, [q, type, from, to]);
 
   const handleSave = async (id: number, payload: UpdateRecordPayload) => {
@@ -141,13 +148,13 @@ function RecordsView() {
           </div>
         ) : (
           <div className="divide-y divide-border/70">
-            {records.map((t, i) => (
+            {paginate(records, page).map((t, i) => (
               <div
                 key={t.recordId}
                 className="group grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 px-5 py-4 hover:bg-muted/40 transition"
               >
                 <div className="flex items-center gap-3">
-                  <span className="mono text-[10px] text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="mono text-[10px] text-muted-foreground w-6">{String((page - 1) * DEFAULT_PAGE_SIZE + i + 1).padStart(2, "0")}</span>
                   <div
                     className={`h-8 w-8 rounded-full grid place-items-center border ${
                       t.recordType === "Income"
@@ -162,6 +169,7 @@ function RecordsView() {
                   <div className="text-sm font-medium truncate">{t.purpose || t.source || "—"}</div>
                   <div className="text-[11px] text-muted-foreground mono mt-0.5 truncate">
                     {t.recordDate.slice(0, 10)} · {t.recordType === "Income" ? t.source ?? "Income" : "Expense"}
+                    {t.paymentMethod ? ` · via ${t.paymentMethod}` : ""}
                     {t.notes ? ` · ${t.notes}` : ""}
                     {t.createdByName ? ` · by ${t.createdByName}` : ""}
                   </div>
@@ -186,6 +194,7 @@ function RecordsView() {
           </div>
         )}
       </div>
+      {!loading && records.length > 0 && <Pagination page={page} totalItems={records.length} onPageChange={setPage} />}
 
       {editing && (
         <EditModal record={editing} onClose={() => setEditing(null)} onSave={(payload) => handleSave(editing.recordId, payload)} />
@@ -208,17 +217,28 @@ function EditModal({
   const [source, setSource] = useState(record.source ?? "");
   const [purpose, setPurpose] = useState(record.purpose ?? "");
   const [notes, setNotes] = useState(record.notes ?? "");
+  const [paymentMethod, setPaymentMethod] = useState(record.paymentMethod ?? "");
+  const [bankName, setBankName] = useState("");
+  const [bankRef, setBankRef] = useState("");
 
   const save = (e: React.FormEvent) => {
     e.preventDefault();
     const amt = parseFloat(amount);
     if (!date || !amt || amt <= 0) return toast.error("Please complete all required fields.");
+    if (paymentMethod === "Bank Transfer" && !bankName.trim()) return toast.error("Specify the bank");
+    const combinedNotes =
+      paymentMethod === "Bank Transfer" && (bankName.trim() || bankRef.trim())
+        ? [notes.trim(), `Bank transfer: ${bankName.trim()}${bankRef.trim() ? ` — ${bankRef.trim()}` : ""}`]
+            .filter(Boolean)
+            .join(" — ")
+        : notes.trim();
     onSave({
       recordDate: date,
       amount: amt,
       source: record.recordType === "Income" ? source.trim() : undefined,
       purpose: purpose.trim() || undefined,
-      notes: notes.trim() || undefined,
+      notes: combinedNotes || undefined,
+      paymentMethod: paymentMethod || undefined,
     });
   };
 
@@ -252,6 +272,23 @@ function EditModal({
           <FloatField label="Purpose" value={purpose}>
             <input value={purpose} onChange={(e) => setPurpose(e.target.value)} maxLength={120} />
           </FloatField>
+          <SelectPicker
+            label="Payment method (optional)"
+            value={paymentMethod}
+            placeholder="Not specified"
+            options={[{ value: "", label: "Not specified" }, ...PAYMENT_METHODS.map((m) => ({ value: m, label: m }))]}
+            onChange={setPaymentMethod}
+          />
+          {paymentMethod === "Bank Transfer" && (
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+              <FloatField label="Bank name / type" value={bankName}>
+                <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
+              </FloatField>
+              <FloatField label="Reference number (optional)" value={bankRef}>
+                <input value={bankRef} onChange={(e) => setBankRef(e.target.value)} maxLength={50} placeholder="REF-000123" />
+              </FloatField>
+            </div>
+          )}
           <FloatField label="Notes" value={notes}>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
           </FloatField>

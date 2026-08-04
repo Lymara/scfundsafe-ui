@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
+import { SelectPicker } from "@/components/select-picker";
 
 type Tab = "account" | "members" | "activity";
 
@@ -54,7 +56,7 @@ export default function SettingsPage() {
             <p className="text-muted-foreground mt-3 max-w-lg text-sm leading-relaxed">
               {isAdmin
                 ? "Provision council accounts, review the audit trail, and manage your credentials."
-                : "Manage your personal credentials for SC FundSafe."}
+                : "Manage your personal credentials for IT FundSafe."}
             </p>
           </div>
           <div className="hidden md:flex items-center gap-2 surface px-3.5 py-2">
@@ -468,15 +470,18 @@ function CreateModal({
         <FloatField label="Temporary password" value={password}>
           <PwInput value={password} onChange={setPassword} />
         </FloatField>
-        <FloatField label="Role" value={role}>
-          <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            <option value="Treasurer">Treasurer</option>
-            <option value="Officer">Officer</option>
-            <option value="ClassRepresentative">Class Representative</option>
-            <option value="Adviser">Adviser</option>
-            <option value="Admin">Admin</option>
-          </select>
-        </FloatField>
+        <SelectPicker
+          label="Role"
+          value={role}
+          options={[
+            { value: "Treasurer", label: "Treasurer" },
+            { value: "Officer", label: "Officer" },
+            { value: "ClassRepresentative", label: "Class Representative" },
+            { value: "Adviser", label: "Adviser" },
+            { value: "Admin", label: "Admin" },
+          ]}
+          onChange={(v) => setRole(v as Role)}
+        />
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" onClick={onClose} className="btn btn-ghost">
             Cancel
@@ -573,6 +578,7 @@ function ActivitySection() {
   const [logs, setLogs] = useState<ActivityLogDto[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     (async () => {
@@ -597,6 +603,10 @@ function ActivitySection() {
     );
   }, [logs, q]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [q]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
@@ -605,7 +615,7 @@ function ActivitySection() {
             <ScrollText className="h-4 w-4 text-emerald" /> Audit trail
           </div>
           <p className="text-xs text-muted-foreground mt-1 max-w-md">
-            A tamper-evident record of every action taken in SC FundSafe.
+            A tamper-evident record of every action taken in IT FundSafe.
           </p>
         </div>
         <div className="mono text-[10px] uppercase tracking-widest text-muted-foreground surface px-3 py-2">
@@ -638,7 +648,7 @@ function ActivitySection() {
           </div>
         ) : (
           <ol className="relative">
-            {results.map((l, i) => {
+            {paginate(results, page).map((l, i) => {
               const d = new Date(l.createdAt);
               return (
                 <li
@@ -658,7 +668,7 @@ function ActivitySection() {
                     <div className="text-[11px] text-muted-foreground mono mt-1 flex items-center gap-2">
                       <span>by {l.userName}</span>
                       <span className="opacity-50">·</span>
-                      <span>#{String(results.length - i).padStart(3, "0")}</span>
+                      <span>#{String(results.length - ((page - 1) * DEFAULT_PAGE_SIZE + i)).padStart(3, "0")}</span>
                     </div>
                   </div>
                   <div className="mono text-[11px] text-muted-foreground text-right whitespace-nowrap">
@@ -673,6 +683,7 @@ function ActivitySection() {
           </ol>
         )}
       </div>
+      {!loading && results.length > 0 && <Pagination page={page} totalItems={results.length} onPageChange={setPage} />}
     </div>
   );
 }
@@ -685,3 +696,4 @@ function FloatField({ label, value, children }: { label: string; value: string; 
     </label>
   );
 }
+

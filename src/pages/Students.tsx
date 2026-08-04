@@ -1,0 +1,1132 @@
+import { useEffect, useMemo, useState } from "react";
+import { AppLayout } from "@/components/app-layout";
+import { useAuth, formatPHP } from "@/lib/auth-context";
+import { SelectPicker } from "@/components/select-picker";
+import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
+import { EyeGlyph } from "@/components/pw-input";
+import {
+  api,
+  PAYMENT_METHODS,
+  type StudentDto,
+  type StudentFeeStatusDto,
+  type StudentFeePaymentDto,
+  type YearLevel,
+  type DuesStatus,
+  type PaymentMethod,
+  type ImportStudentsResultDto,
+} from "@/lib/api";
+import {
+  GraduationCap,
+  Search,
+  UserPlus,
+  Upload,
+  Download,
+  X,
+  ArrowRight,
+  Wallet,
+  CheckCircle2,
+  CircleDashed,
+  CircleDot,
+  Pencil,
+  Trash2,
+} from "lucide-react";
+import { toast } from "sonner";
+import { cn, toTitleCase } from "@/lib/utils";
+
+export default function StudentsPage() {
+  return (
+    <AppLayout>
+      <StudentsView />
+    </AppLayout>
+  );
+}
+
+type YearTab = "all" | YearLevel;
+
+const YEAR_LEVEL_OPTIONS = [
+  { value: "1", label: "1st Year" },
+  { value: "2", label: "2nd Year" },
+  { value: "3", label: "3rd Year" },
+  { value: "4", label: "4th Year" },
+];
+
+function StudentsView() {
+  const { currentUser } = useAuth();
+  const canRecordPayment = currentUser?.role === "Treasurer";
+  const canManageStudents = currentUser?.role === "Admin";
+
+  const [yearTab, setYearTab] = useState<YearTab>("all");
+  const [status, setStatus] = useState<DuesStatus | "">("");
+  const [keyword, setKeyword] = useState("");
+  const [students, setStudents] = useState<StudentDto[]>([]);
+  const [allStudents, setAllStudents] = useState<StudentDto[]>([]); // unfiltered, for the chart
+  const [loading, setLoading] = useState(true);
+
+  const [payingStudent, setPayingStudent] = useState<StudentDto | null>(null);
+  const [editingStudent, setEditingStudent] = useState<StudentDto | null>(null);
+  const [viewingStudent, setViewingStudent] = useState<StudentDto | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [page, setPage] = useState(1);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const [roster, all] = await Promise.all([
+        api.getStudents({
+          yearLevel: yearTab === "all" ? "" : yearTab,
+          status,
+          keyword: keyword || undefined,
+        }),
+        api.getStudents({}),
+      ]);
+      setStudents(roster);
+      setAllStudents(all);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load students");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setPage(1);
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yearTab, status]);
+
+  const runSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setPage(1);
+    load();
+  };
+
+  const yearTabs: { id: YearTab; label: string }[] = [
+    { id: "all", label: "All Years" },
+    { id: 1, label: "1st Year" },
+    { id: 2, label: "2nd Year" },
+    { id: 3, label: "3rd Year" },
+    { id: 4, label: "4th Year" },
+  ];
+
+  return (
+    <div className="space-y-10 pb-16">
+      <header className="flex items-start justify-between gap-6 flex-wrap">
+        <div>
+          <div className="eyebrow flex items-center gap-2">
+            <GraduationCap className="h-3 w-3 text-amber" /> BSIT Department
+          </div>
+          <h1 className="display text-4xl md:text-5xl mt-3">Students.</h1>
+          <p className="text-muted-foreground mt-3 max-w-lg text-sm leading-relaxed">
+            The full roster across all four year levels — who's paid their fees, who hasn't, and how.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {canManageStudents && (
+            <>
+              <button onClick={() => setImporting(true)} className="btn btn-ghost">
+                <Upload className="h-3.5 w-3.5" /> Import CSV
+              </button>
+              <button onClick={() => setAdding(true)} className="btn btn-primary">
+                <UserPlus className="h-3.5 w-3.5" /> Add student
+              </button>
+            </>
+          )}
+        </div>
+      </header>
+
+      {allStudents.length > 0 && <RosterOverview students={allStudents} />}
+
+      <nav className="flex flex-wrap gap-2">
+        {yearTabs.map((t) => (
+          <button
+            key={String(t.id)}
+            onClick={() => setYearTab(t.id)}
+            className={cn(
+              "px-4 py-2 rounded-full text-xs font-medium transition surface",
+              yearTab === t.id ? "ring-1 ring-emerald/40 text-emerald bg-emerald/5" : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
+      <form onSubmit={runSearch} className="surface p-2 flex flex-wrap items-center gap-1">
+        <div className="relative flex-1 min-w-[220px]">
+          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="Search name, student number, section…"
+            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+          />
+        </div>
+        <div className="flex items-center gap-1 pl-2 border-l border-border/70">
+          {(["", "Paid", "Partial", "Unpaid"] as (DuesStatus | "")[]).map((s) => (
+            <button
+              key={s || "all"}
+              type="button"
+              onClick={() => setStatus(s)}
+              className={cn(
+                "px-3 py-1.5 rounded-md text-xs transition",
+                status === s ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground hover:bg-muted",
+              )}
+            >
+              {s || "All"}
+            </button>
+          ))}
+        </div>
+        <button type="submit" className="btn btn-ghost ml-auto">
+          <Search className="h-3.5 w-3.5" /> Search
+        </button>
+      </form>
+
+      <RosterTable
+        students={students}
+        loading={loading}
+        canRecordPayment={canRecordPayment}
+        canManageStudents={canManageStudents}
+        onRecordPayment={setPayingStudent}
+        onEdit={setEditingStudent}
+        onView={setViewingStudent}
+        onDeleted={load}
+        page={page}
+        onPageChange={setPage}
+      />
+
+      {payingStudent && (
+        <RecordPaymentModal
+          student={payingStudent}
+          onClose={() => setPayingStudent(null)}
+          onSaved={() => {
+            setPayingStudent(null);
+            load();
+          }}
+        />
+      )}
+      {editingStudent && (
+        <EditStudentModal
+          student={editingStudent}
+          onClose={() => setEditingStudent(null)}
+          onSaved={() => {
+            setEditingStudent(null);
+            load();
+          }}
+        />
+      )}
+      {viewingStudent && (
+        <StudentDetailModal
+          student={viewingStudent}
+          onClose={() => setViewingStudent(null)}
+          canRecordPayment={canRecordPayment}
+          onCollectPayment={() => {
+            setViewingStudent(null);
+            setPayingStudent(viewingStudent);
+          }}
+        />
+      )}
+      {adding && (
+        <AddStudentModal
+          onClose={() => setAdding(false)}
+          onSaved={() => {
+            setAdding(false);
+            load();
+          }}
+        />
+      )}
+      {importing && (
+        <ImportModal
+          onClose={() => setImporting(false)}
+          onImported={() => {
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Analytics / Charts ---------------- */
+
+function RosterOverview({ students }: { students: StudentDto[] }) {
+  const byYear = ([1, 2, 3, 4] as YearLevel[]).map((yl) => {
+    const rows = students.filter((s) => s.yearLevel === yl);
+    return {
+      yearLevel: yl,
+      total: rows.length,
+      paid: rows.filter((r) => r.status === "Paid").length,
+      partial: rows.filter((r) => r.status === "Partial").length,
+      unpaid: rows.filter((r) => r.status === "Unpaid").length,
+      collected: rows.reduce((s, r) => s + r.totalPaid, 0),
+      expected: rows.reduce((s, r) => s + r.totalDue, 0),
+    };
+  });
+
+  const totalStudents = students.length;
+  const paidCount = students.filter((s) => s.status === "Paid").length;
+  const totalCollected = students.reduce((s, r) => s + r.totalPaid, 0);
+  const totalExpected = students.reduce((s, r) => s + r.totalDue, 0);
+  const paidPct = totalStudents > 0 ? Math.round((paidCount / totalStudents) * 100) : 0;
+  const collectedPct = totalExpected > 0 ? Math.min(100, Math.round((totalCollected / totalExpected) * 100)) : 0;
+
+  const lowest = [...byYear].sort((a, b) => {
+    const rateA = a.total ? a.paid / a.total : 1;
+    const rateB = b.total ? b.paid / b.total : 1;
+    return rateA - rateB;
+  })[0];
+
+  return (
+    <section className="grid lg:grid-cols-[1.3fr_1fr_1fr] gap-4">
+      <div className="surface-lift p-6">
+        <div className="eyebrow mb-4">Paid vs. unpaid by year level</div>
+        <BarChart rows={byYear} />
+      </div>
+      <div className="surface-lift p-6 flex flex-col items-center justify-center text-center">
+        <div className="eyebrow mb-3 self-start">Overall collection</div>
+        <Donut percent={paidPct} />
+        <div className="mt-3 text-xs text-muted-foreground">
+          {paidCount} of {totalStudents} students fully paid
+        </div>
+      </div>
+      <div className="surface-lift p-6 flex flex-col gap-4">
+        <div>
+          <div className="eyebrow mb-2">Collected vs. expected</div>
+          <div className="mono text-2xl gradient-text">{formatPHP(totalCollected)}</div>
+          <div className="text-[11px] text-muted-foreground mono mt-0.5">of {formatPHP(totalExpected)} expected</div>
+          <div className="mt-3 h-2 rounded-full bg-muted overflow-hidden">
+            <div className="h-full gradient-emerald rounded-full transition-all" style={{ width: `${collectedPct}%` }} />
+          </div>
+          <div className="mt-1 text-[10px] text-muted-foreground mono">{collectedPct}% collected</div>
+        </div>
+        {lowest && lowest.total > 0 && (
+          <div className="hairline-t pt-3 text-xs">
+            <div className="text-muted-foreground">Needs the most follow-up</div>
+            <div className="mt-1 font-medium">
+              Year {lowest.yearLevel} · {lowest.paid}/{lowest.total} paid
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+interface YearRow {
+  yearLevel: YearLevel;
+  total: number;
+  paid: number;
+  partial: number;
+  unpaid: number;
+}
+
+function BarChart({ rows }: { rows: YearRow[] }) {
+  const width = 560;
+  const height = 200;
+  const padding = { top: 10, right: 10, bottom: 28, left: 10 };
+  const maxTotal = Math.max(1, ...rows.map((r) => r.total));
+  const groupWidth = (width - padding.left - padding.right) / rows.length;
+  const barWidth = Math.min(34, groupWidth * 0.28);
+  const chartH = height - padding.top - padding.bottom;
+  const scale = (n: number) => (n / maxTotal) * chartH;
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[200px]">
+      {rows.map((r, i) => {
+        const cx = padding.left + groupWidth * i + groupWidth / 2;
+        const paidH = scale(r.paid);
+        const partialH = scale(r.partial);
+        const unpaidH = scale(r.unpaid);
+        const gap = 4;
+        const x1 = cx - barWidth * 1.5 - gap;
+        const x2 = cx - barWidth / 2;
+        const x3 = cx + barWidth / 2 + gap;
+
+        return (
+          <g key={r.yearLevel}>
+            <rect x={x1} y={padding.top + chartH - paidH} width={barWidth} height={paidH} rx={3} fill="var(--emerald)" />
+            <rect x={x2} y={padding.top + chartH - partialH} width={barWidth} height={partialH} rx={3} fill="var(--amber)" />
+            <rect
+              x={x3}
+              y={padding.top + chartH - unpaidH}
+              width={barWidth}
+              height={unpaidH}
+              rx={3}
+              fill="var(--muted-foreground)"
+              opacity={0.35}
+            />
+            <text x={cx} y={height - 8} textAnchor="middle" fontSize="11" fill="var(--muted-foreground)" className="mono">
+              Year {r.yearLevel}
+            </text>
+          </g>
+        );
+      })}
+      <line x1={padding.left} y1={padding.top + chartH} x2={width - padding.right} y2={padding.top + chartH} stroke="var(--border)" />
+      <g transform={`translate(${width - 190}, 4)`} className="mono" fontSize="10">
+        <rect width="9" height="9" rx="2" fill="var(--emerald)" />
+        <text x="14" y="8" fill="var(--muted-foreground)">Paid</text>
+        <rect x="52" width="9" height="9" rx="2" fill="var(--amber)" />
+        <text x="66" y="8" fill="var(--muted-foreground)">Partial</text>
+        <rect x="118" width="9" height="9" rx="2" fill="var(--muted-foreground)" opacity={0.35} />
+        <text x="132" y="8" fill="var(--muted-foreground)">Unpaid</text>
+      </g>
+    </svg>
+  );
+}
+
+function Donut({ percent }: { percent: number }) {
+  const size = 132;
+  const stroke = 14;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const offset = c - (percent / 100) * c;
+
+  return (
+    <div className="relative" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--muted)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          fill="none"
+          stroke="var(--emerald)"
+          strokeWidth={stroke}
+          strokeDasharray={c}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-items-center">
+        <div className="mono text-2xl font-semibold">{percent}%</div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- Roster table ---------------- */
+
+function statusPill(status: DuesStatus) {
+  const map: Record<DuesStatus, { icon: typeof CheckCircle2; cls: string }> = {
+    Paid: { icon: CheckCircle2, cls: "text-emerald ring-emerald/30 bg-emerald/5" },
+    Partial: { icon: CircleDot, cls: "text-amber ring-amber/30 bg-amber/5" },
+    Unpaid: { icon: CircleDashed, cls: "text-muted-foreground ring-border bg-muted/40" },
+  };
+  const { icon: Icon, cls } = map[status];
+  return (
+    <span className={cn("inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] uppercase tracking-widest mono ring-1", cls)}>
+      <Icon className="h-3 w-3" /> {status}
+    </span>
+  );
+}
+
+function RosterTable({
+  students,
+  loading,
+  canRecordPayment,
+  canManageStudents,
+  onRecordPayment,
+  onEdit,
+  onView,
+  onDeleted,
+  page,
+  onPageChange,
+}: {
+  students: StudentDto[];
+  loading: boolean;
+  canRecordPayment: boolean;
+  canManageStudents: boolean;
+  onRecordPayment: (s: StudentDto) => void;
+  onEdit: (s: StudentDto) => void;
+  onView: (s: StudentDto) => void;
+  onDeleted: () => void;
+  page: number;
+  onPageChange: (page: number) => void;
+}) {
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const pageItems = paginate(students, page);
+
+  const handleDelete = async (s: StudentDto) => {
+    if (!confirm(`Remove ${toTitleCase(s.fullName)} from the roster? This only works if they have no recorded payments yet.`)) return;
+    setDeletingId(s.studentId);
+    try {
+      await api.deleteStudent(s.studentId);
+      toast.success("Student removed");
+      onDeleted();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove student");
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <div className="surface overflow-hidden">
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="eyebrow text-left hairline-b">
+              <th className="px-5 py-3 font-semibold w-10">#</th>
+              <th className="px-4 py-3 font-semibold">Student</th>
+              <th className="px-4 py-3 font-semibold whitespace-nowrap">Year</th>
+              <th className="px-4 py-3 font-semibold whitespace-nowrap">Fees settled</th>
+              <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">Paid</th>
+              <th className="px-4 py-3 font-semibold text-right whitespace-nowrap">Balance</th>
+              <th className="px-4 py-3 font-semibold whitespace-nowrap">Status</th>
+              <th className="px-5 py-3 font-semibold text-right whitespace-nowrap">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border/70">
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="p-12 text-center">
+                  <div className="mono text-xs text-muted-foreground">LOADING…</div>
+                </td>
+              </tr>
+            ) : students.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="p-12 text-center">
+                  <div className="mono text-xs text-muted-foreground">NO MATCHES</div>
+                  <div className="mt-2 text-sm text-muted-foreground">Try a different search or filter.</div>
+                </td>
+              </tr>
+            ) : (
+              pageItems.map((s, i) => {
+                const displayName = toTitleCase(s.fullName);
+                const initials = displayName
+                  .split(" ")
+                  .map((p) => p[0])
+                  .slice(0, 2)
+                  .join("")
+                  .toUpperCase();
+                return (
+                  <tr key={s.studentId} className="hover:bg-muted/40 transition group">
+                    <td className="px-5 py-4 mono text-[10px] text-muted-foreground">
+                      {String((page - 1) * DEFAULT_PAGE_SIZE + i + 1).padStart(2, "0")}
+                    </td>
+                    <td className="px-4 py-4">
+                      <button onClick={() => onView(s)} className="min-w-0 flex items-center gap-3 text-left group/name">
+                        <div className="h-8 w-8 rounded-full grid place-items-center text-[10px] font-semibold bg-muted text-foreground/80 ring-1 ring-border shrink-0">
+                          {initials}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate group-hover/name:text-emerald transition">{displayName}</div>
+                          <div className="text-[11px] text-muted-foreground mono truncate">{s.studentNumber}</div>
+                        </div>
+                      </button>
+                    </td>
+                    <td className="px-4 py-4 text-xs text-muted-foreground whitespace-nowrap">
+                      Year {s.yearLevel}
+                      {s.section ? ` · ${s.section}` : ""}
+                    </td>
+                    <td className="px-4 py-4">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden shrink-0">
+                          <div
+                            className="h-full rounded-full gradient-emerald"
+                            style={{ width: `${s.feeCount ? Math.min(100, (s.paidFeeCount / s.feeCount) * 100) : 0}%` }}
+                          />
+                        </div>
+                        <span className="mono text-[10px] text-muted-foreground whitespace-nowrap">
+                          {s.paidFeeCount}/{s.feeCount}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 mono text-xs text-emerald text-right whitespace-nowrap">{formatPHP(s.totalPaid)}</td>
+                    <td className="px-4 py-4 mono text-xs text-right whitespace-nowrap">
+                      {s.balance > 0 ? (
+                        <span className="text-destructive">{formatPHP(s.balance)}</span>
+                      ) : (
+                        <span className="text-muted-foreground">₱0.00</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-4 whitespace-nowrap">{statusPill(s.status)}</td>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => onView(s)}
+                          className="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                          title="View student"
+                        >
+                          <EyeGlyph className="h-3.5 w-3.5" />
+                        </button>
+                        {canRecordPayment && s.status !== "Paid" && (
+                          <button
+                            onClick={() => onRecordPayment(s)}
+                            className="p-2 rounded-md hover:bg-emerald/10 text-muted-foreground hover:text-emerald transition"
+                            title="Record payment"
+                          >
+                            <Wallet className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {canManageStudents && (
+                          <>
+                            <button
+                              onClick={() => onEdit(s)}
+                              className="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                              title="Edit student"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(s)}
+                              disabled={deletingId === s.studentId}
+                              className="p-2 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition disabled:opacity-40"
+                              title="Remove student"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination page={page} totalItems={students.length} onPageChange={onPageChange} />
+    </div>
+  );
+}
+
+
+function ModalShell({
+  title,
+  subtitle,
+  onClose,
+  children,
+  wide,
+}: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  wide?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-foreground/30 backdrop-blur-sm animate-fade-in" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={cn("surface-lift w-full p-8 space-y-6 animate-scale-in max-h-[86vh] overflow-y-auto", wide ? "max-w-xl" : "max-w-md")}
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <div className="eyebrow">Students</div>
+            <h3 className="display text-2xl mt-1">{title}</h3>
+            {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
+          </div>
+          <button type="button" onClick={onClose} className="p-2 -m-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="hairline-b" />
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FloatField({ label, value, children }: { label: string; value: string; children: React.ReactNode }) {
+  return (
+    <label className={"field" + (value ? " is-filled" : "")}>
+      {children}
+      <span className="field-label">{label}</span>
+    </label>
+  );
+}
+
+function StudentDetailModal({
+  student,
+  onClose,
+  canRecordPayment,
+  onCollectPayment,
+}: {
+  student: StudentDto;
+  onClose: () => void;
+  canRecordPayment: boolean;
+  onCollectPayment: () => void;
+}) {
+  const [fees, setFees] = useState<StudentFeeStatusDto[] | null>(null);
+  const [history, setHistory] = useState<StudentFeePaymentDto[] | null>(null);
+
+  useEffect(() => {
+    api
+      .getStudentFees(student.studentId)
+      .then(setFees)
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load fees"));
+    api
+      .getPayments({ studentId: student.studentId })
+      .then(setHistory)
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load payment history"));
+  }, [student.studentId]);
+
+  return (
+    <ModalShell
+      title={toTitleCase(student.fullName)}
+      subtitle={`${student.studentNumber} · Year ${student.yearLevel}${student.section ? ` · ${student.section}` : ""}`}
+      onClose={onClose}
+      wide
+    >
+      <div className="space-y-6">
+        <div className="grid grid-cols-3 gap-3">
+          <div className="surface p-4">
+            <div className="eyebrow">Due</div>
+            <div className="mono mt-2">{formatPHP(student.totalDue)}</div>
+          </div>
+          <div className="surface p-4">
+            <div className="eyebrow">Paid</div>
+            <div className="mono mt-2 text-emerald">{formatPHP(student.totalPaid)}</div>
+          </div>
+          <div className="surface p-4">
+            <div className="eyebrow">Balance</div>
+            <div className={cn("mono mt-2", student.balance > 0 ? "text-destructive" : "text-muted-foreground")}>
+              {formatPHP(student.balance)}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="eyebrow mb-2">Fee breakdown</div>
+          {fees === null ? (
+            <div className="text-xs text-muted-foreground">Loading…</div>
+          ) : fees.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No fees apply to this student yet.</div>
+          ) : (
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {fees.map((f) => {
+                const settled = f.status === "Paid";
+                const partial = f.status === "Partial";
+                return (
+                  <div key={f.feeId} className="flex items-center justify-between rounded-lg border border-border/70 px-3.5 py-2.5">
+                    <div className="flex items-center gap-2.5 text-sm min-w-0">
+                      {settled ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald shrink-0" />
+                      ) : partial ? (
+                        <CircleDot className="h-4 w-4 text-amber shrink-0" />
+                      ) : (
+                        <CircleDashed className="h-4 w-4 text-muted-foreground shrink-0" />
+                      )}
+                      <span className="truncate">{f.feeName}</span>
+                    </div>
+                    <div className="mono text-xs shrink-0 ml-2">
+                      {formatPHP(f.amountPaid)} <span className="text-muted-foreground">/ {formatPHP(f.amountDue)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <div className="eyebrow mb-2">Payment history</div>
+          {history === null ? (
+            <div className="text-xs text-muted-foreground">Loading…</div>
+          ) : history.length === 0 ? (
+            <div className="text-xs text-muted-foreground">No payments yet.</div>
+          ) : (
+            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+              {history.map((p) => (
+                <div key={p.paymentId} className="flex items-center justify-between rounded-lg bg-muted/40 px-3.5 py-2.5">
+                  <div className="min-w-0">
+                    <div className="text-sm truncate">
+                      {p.feeName}
+                      {p.isRefund && (
+                        <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive ml-2">
+                          Refund
+                        </span>
+                      )}
+                    </div>
+                    <div className="mono text-[10px] text-muted-foreground mt-0.5">
+                      {new Date(p.paymentDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} ·{" "}
+                      {p.paymentMethod}
+                      {p.reference ? ` · ${p.reference}` : ""}
+                    </div>
+                  </div>
+                  <span className={cn("mono text-sm shrink-0 ml-2", p.isRefund ? "text-destructive" : "text-emerald")}>
+                    {p.isRefund ? "−" : ""}
+                    {formatPHP(p.amount)}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {canRecordPayment && student.status !== "Paid" && (
+          <button onClick={onCollectPayment} className="btn btn-primary w-full">
+            <Wallet className="h-4 w-4" /> Collect payment
+          </button>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+function RecordPaymentModal({
+  student,
+  onClose,
+  onSaved,
+}: {
+  student: StudentDto;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [fees, setFees] = useState<StudentFeeStatusDto[] | null>(null);
+  const [feeId, setFeeId] = useState<number | null>(null);
+  const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [method, setMethod] = useState<PaymentMethod>("Cash");
+  const [reference, setReference] = useState("");
+  const [bankName, setBankName] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    api
+      .getStudentFees(student.studentId)
+      .then((data) => {
+        setFees(data);
+        const firstUnpaid = data.find((f) => f.status !== "Paid");
+        if (firstUnpaid) {
+          setFeeId(firstUnpaid.feeId);
+          setAmount(String(firstUnpaid.balance));
+        }
+      })
+      .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load fees"));
+  }, [student.studentId]);
+
+  const selectedFee = fees?.find((f) => f.feeId === feeId) ?? null;
+
+  const pickFee = (f: StudentFeeStatusDto) => {
+    setFeeId(f.feeId);
+    setAmount(String(f.balance));
+  };
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feeId) return toast.error("Select a fee to pay");
+    const amt = parseFloat(amount);
+    if (!amt || amt <= 0) return toast.error("Enter a valid amount");
+    if (method === "Bank Transfer" && !bankName.trim()) return toast.error("Specify the bank");
+    if (method !== "Cash" && !reference.trim()) return toast.error("Enter a reference number for this payment method");
+
+    setSubmitting(true);
+    try {
+      await api.recordFeePayment(student.studentId, {
+        feeId,
+        amount: amt,
+        paymentDate: date,
+        paymentMethod: method,
+        reference:
+          method === "Bank Transfer"
+            ? `${bankName.trim()} — ${reference.trim()}`
+            : method !== "Cash"
+              ? reference.trim()
+              : undefined,
+      });
+      toast.success("Payment recorded");
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to record payment");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Collect payment" subtitle={`${toTitleCase(student.fullName)} (${student.studentNumber}) · Year ${student.yearLevel}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-4">
+        <div>
+          <span className="eyebrow">Fee</span>
+          <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
+            {fees === null ? (
+              <div className="text-xs text-muted-foreground">Loading fees…</div>
+            ) : fees.length === 0 ? (
+              <div className="text-xs text-muted-foreground">No fees apply to this student yet.</div>
+            ) : (
+              fees.map((f) => (
+                <button
+                  key={f.feeId}
+                  type="button"
+                  onClick={() => pickFee(f)}
+                  className={cn(
+                    "w-full flex items-center justify-between rounded-lg border px-3.5 py-3 text-left transition",
+                    feeId === f.feeId ? "border-emerald/50 bg-emerald/8" : "border-border/70 hover:bg-muted/50",
+                    f.status === "Paid" && "opacity-50",
+                  )}
+                >
+                  <div>
+                    <div className="text-sm font-medium">{f.feeName}</div>
+                    <div className="mono text-[10px] text-muted-foreground mt-0.5">
+                      {f.feeCategory} · due {new Date(f.feeDueDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="mono text-sm">{formatPHP(f.amountDue)}</div>
+                    <div className={cn("mono text-[10px]", f.status === "Paid" ? "text-emerald" : "text-amber")}>
+                      {f.status === "Paid" ? "SETTLED" : `${formatPHP(f.balance)} left`}
+                    </div>
+                  </div>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          <FloatField label="Amount (PHP)" value={amount}>
+            <input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+          </FloatField>
+          <FloatField label="Date" value={date}>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </FloatField>
+        </div>
+        <SelectPicker
+          label="Payment method"
+          value={method}
+          options={[...PAYMENT_METHODS]}
+          onChange={(v) => setMethod(v as PaymentMethod)}
+        />
+        {method === "Bank Transfer" && (
+          <FloatField label="Bank name / type" value={bankName}>
+            <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
+          </FloatField>
+        )}
+        {method !== "Cash" && (
+          <FloatField label="Reference number" value={reference}>
+            <input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={50} placeholder="REF-000123" />
+          </FloatField>
+        )}
+        <div className="flex justify-end gap-2 pt-2">
+          <button type="button" onClick={onClose} className="btn btn-ghost">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting || !selectedFee} className="btn btn-primary">
+            {submitting ? "Saving…" : "Save payment"} <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function EditStudentModal({
+  student,
+  onClose,
+  onSaved,
+}: {
+  student: StudentDto;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [fullName, setFullName] = useState(student.fullName);
+  const [yearLevel, setYearLevel] = useState<YearLevel>(student.yearLevel);
+  const [section, setSection] = useState(student.section ?? "");
+  const [email, setEmail] = useState(student.email ?? "");
+  const [isActive, setIsActive] = useState(student.isActive);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fullName.trim()) return toast.error("Full name is required");
+
+    setSubmitting(true);
+    try {
+      await api.updateStudent(student.studentId, {
+        fullName: fullName.trim(),
+        yearLevel,
+        section: section.trim() || undefined,
+        email: email.trim() || undefined,
+        isActive,
+      });
+      toast.success("Student updated");
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update student");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Edit student" subtitle={`${student.studentNumber} · currently Year ${student.yearLevel}`} onClose={onClose}>
+      <form onSubmit={submit} className="space-y-2">
+        <FloatField label="Full name" value={fullName}>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+        </FloatField>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          <SelectPicker
+            label="Year level"
+            value={String(yearLevel)}
+            options={YEAR_LEVEL_OPTIONS}
+            onChange={(v) => setYearLevel(Number(v) as YearLevel)}
+          />
+          <FloatField label="Section (optional)" value={section}>
+            <input value={section} onChange={(e) => setSection(e.target.value)} placeholder="BSIT-3A" />
+          </FloatField>
+        </div>
+        <FloatField label="Email (optional)" value={email}>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </FloatField>
+        <label className="flex items-center gap-2 pt-3 text-sm cursor-pointer">
+          <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="h-4 w-4" />
+          Active (uncheck to mark this student inactive without deleting their history)
+        </label>
+        <div className="flex justify-end gap-2 pt-4">
+          <button type="button" onClick={onClose} className="btn btn-ghost">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn btn-primary">
+            {submitting ? "Saving…" : "Save changes"} <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function AddStudentModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const [studentNumber, setStudentNumber] = useState("");
+  const [fullName, setFullName] = useState("");
+  const [yearLevel, setYearLevel] = useState<YearLevel>(1);
+  const [section, setSection] = useState("");
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!studentNumber.trim() || !fullName.trim()) return toast.error("Student number and name are required");
+
+    setSubmitting(true);
+    try {
+      await api.createStudent({
+        studentNumber: studentNumber.trim(),
+        fullName: fullName.trim(),
+        yearLevel,
+        section: section.trim() || undefined,
+        email: email.trim() || undefined,
+      });
+      toast.success("Student added");
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to add student");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title="Add student" subtitle="Enroll one student and set up their fee records." onClose={onClose}>
+      <form onSubmit={submit} className="space-y-2">
+        <FloatField label="Student number" value={studentNumber}>
+          <input value={studentNumber} onChange={(e) => setStudentNumber(e.target.value)} placeholder="2026-0123" />
+        </FloatField>
+        <FloatField label="Full name" value={fullName}>
+          <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
+        </FloatField>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          <SelectPicker
+            label="Year level"
+            value={String(yearLevel)}
+            options={YEAR_LEVEL_OPTIONS}
+            onChange={(v) => setYearLevel(Number(v) as YearLevel)}
+          />
+          <FloatField label="Section (optional)" value={section}>
+            <input value={section} onChange={(e) => setSection(e.target.value)} placeholder="BSIT-3A" />
+          </FloatField>
+        </div>
+        <FloatField label="Email (optional)" value={email}>
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+        </FloatField>
+        <div className="flex justify-end gap-2 pt-4">
+          <button type="button" onClick={onClose} className="btn btn-ghost">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn btn-primary">
+            {submitting ? "Adding…" : "Add student"} <ArrowRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function ImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState<ImportStudentsResultDto | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) return toast.error("Choose a CSV file first");
+
+    setSubmitting(true);
+    try {
+      const res = await api.importStudents(file);
+      setResult(res.data);
+      onImported();
+      if (res.data.importedCount > 0) toast.success(`Imported ${res.data.importedCount} student(s)`);
+      if (res.data.skippedCount > 0) toast.error(`${res.data.skippedCount} row(s) were skipped`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title="Import students"
+      subtitle="Upload a CSV: StudentNumber, FullName, YearLevel, Section, Email"
+      onClose={onClose}
+      wide
+    >
+      <div className="space-y-5">
+        <a
+          href={api.downloadImportTemplateUrl()}
+          className="inline-flex items-center gap-1.5 text-xs text-emerald hover:underline"
+        >
+          <Download className="h-3.5 w-3.5" /> Download blank CSV template
+        </a>
+
+        <form onSubmit={submit} className="space-y-4">
+          <label className="surface p-6 flex flex-col items-center justify-center gap-2 border-dashed cursor-pointer hover:bg-muted/30 transition">
+            <Upload className="h-5 w-5 text-muted-foreground" />
+            <span className="text-xs text-muted-foreground">{file ? file.name : "Click to choose a .csv file"}</span>
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+          </label>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={onClose} className="btn btn-ghost">
+              Close
+            </button>
+            <button type="submit" disabled={submitting || !file} className="btn btn-primary">
+              {submitting ? "Importing…" : "Import"} <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </form>
+
+        {result && (
+          <div className="hairline-t pt-4 space-y-3 text-xs">
+            <div className="flex gap-4">
+              <span className="text-emerald font-medium">{result.importedCount} imported</span>
+              <span className="text-destructive font-medium">{result.skippedCount} skipped</span>
+              <span className="text-muted-foreground">of {result.totalRows} rows</span>
+            </div>
+            {result.skipped.length > 0 && (
+              <div className="surface p-3 max-h-40 overflow-y-auto space-y-1.5">
+                {result.skipped.map((s) => (
+                  <div key={s.rowNumber} className="text-muted-foreground">
+                    <span className="mono text-destructive">Row {s.rowNumber}:</span> {s.reason}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </ModalShell>
+  );
+}

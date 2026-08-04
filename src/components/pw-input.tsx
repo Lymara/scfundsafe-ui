@@ -46,7 +46,7 @@ export function PwInput({
   );
 }
 
-function EyeGlyph({ className }: { className?: string }) {
+export function EyeGlyph({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"
