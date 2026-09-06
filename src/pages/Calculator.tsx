@@ -319,7 +319,13 @@ function FinesCalculator() {
                     onChange={(e) => setFinePerDayEvent(e.target.value)}
                   />
                 </FloatField>
+<<<<<<< HEAD
                 <DatePicker label="Calculate until" value={calculateUntil} onChange={setCalculateUntil} />
+=======
+                <FloatField label="Calculate until" value={calculateUntil}>
+                  <input type="date" value={calculateUntil} onChange={(e) => setCalculateUntil(e.target.value)} />
+                </FloatField>
+>>>>>>> 376936b91c3f7051befb2e471c0c731134a2f55a
               </div>
 
               <ResultCard
@@ -335,8 +341,17 @@ function FinesCalculator() {
       ) : (
         <div className="surface-lift p-8 space-y-6">
           <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+<<<<<<< HEAD
             <DatePicker label="Start date" value={startDate} onChange={setStartDate} />
             <DatePicker label="End date" value={endDate} onChange={setEndDate} />
+=======
+            <FloatField label="Start date" value={startDate}>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </FloatField>
+            <FloatField label="End date" value={endDate}>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </FloatField>
+>>>>>>> 376936b91c3f7051befb2e471c0c731134a2f55a
           </div>
           <FloatField label="Fine per day (PHP)" value={finePerDayCustom}>
             <input type="number" step="0.01" min="0" value={finePerDayCustom} onChange={(e) => setFinePerDayCustom(e.target.value)} />

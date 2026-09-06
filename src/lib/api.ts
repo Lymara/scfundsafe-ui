@@ -1,3 +1,4 @@
+
 const API_BASE = import.meta.env.VITE_API_URL || "https://localhost:7050/api";
 
 export type Role = "Admin" | "Treasurer" | "Officer" | "ClassRepresentative" | "Adviser";
@@ -202,7 +203,10 @@ export interface StudentFeePaymentDto {
   paymentDate: string;
   paymentMethod: PaymentMethod;
   isRefund: boolean;
+<<<<<<< HEAD
   hasReceipt: boolean;
+=======
+>>>>>>> 376936b91c3f7051befb2e471c0c731134a2f55a
   reference?: string | null;
   notes?: string | null;
   recordedByName?: string | null;
@@ -477,13 +481,21 @@ export const api = {
 
   // Fee payments
   recordFeePayment: (studentId: number, payload: RecordFeePaymentPayload) =>
+<<<<<<< HEAD
     request<{ message: string; data: StudentDto; paymentId: number }>(`/students/${studentId}/payments`, {
+=======
+    request<{ message: string; data: StudentDto }>(`/students/${studentId}/payments`, {
+>>>>>>> 376936b91c3f7051befb2e471c0c731134a2f55a
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
   recordRefund: (studentId: number, payload: RecordRefundPayload) =>
+<<<<<<< HEAD
     request<{ message: string; data: StudentDto; paymentId: number }>(`/students/${studentId}/refunds`, {
+=======
+    request<{ message: string; data: StudentDto }>(`/students/${studentId}/refunds`, {
+>>>>>>> 376936b91c3f7051befb2e471c0c731134a2f55a
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -493,6 +505,7 @@ export const api = {
       `/students/payments${toQuery(params as unknown as Record<string, string | undefined>)}`,
     ),
 
+<<<<<<< HEAD
   uploadReceipt: async (paymentId: number, file: File) => {
     const token = getToken();
     const form = new FormData();
@@ -518,6 +531,8 @@ export const api = {
     return res.blob();
   },
 
+=======
+>>>>>>> 376936b91c3f7051befb2e471c0c731134a2f55a
   getStudentFees: (studentId: number) =>
     request<StudentFeeStatusDto[]>(`/students/${studentId}/fees`),
 
