@@ -112,7 +112,12 @@ export default function AuthPage() {
                   <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
                 </FloatField>
                 <FloatField label="Password" value={password}>
-                  <PwInput value={password} onChange={setPassword} autoComplete="current-password" hideButtonWhenEmpty />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    autoComplete="current-password"
+                  />
                 </FloatField>
 
                 <button type="submit" disabled={submitting} className="btn btn-primary w-full mt-8">

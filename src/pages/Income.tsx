@@ -14,8 +14,6 @@ import { TrendingUp, ArrowRight, ArrowLeft, Wallet, Plus, X, Search, CheckCircle
 import { toast } from "sonner";
 import { cn, toTitleCase } from "@/lib/utils";
 import { SelectPicker } from "@/components/select-picker";
-import { DatePicker } from "@/components/date-picker";
-import { ReferenceNumberField } from "@/components/reference-field";
 import { Pagination, paginate } from "@/components/pagination";
 
 export default function IncomePage() {
@@ -155,7 +153,9 @@ function IncomeForm() {
                 <FloatField label="Bank name / type" value={bankName}>
                   <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
                 </FloatField>
-                <ReferenceNumberField label="Reference number (optional)" value={bankRef} onChange={setBankRef} />
+                <FloatField label="Reference number (optional)" value={bankRef}>
+                  <input value={bankRef} onChange={(e) => setBankRef(e.target.value)} maxLength={50} placeholder="REF-000123" />
+                </FloatField>
               </div>
             )}
           </div>
@@ -616,7 +616,9 @@ function EditFeeModal({
               <input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </FloatField>
           </div>
-          <DatePicker label="Due date" value={dueDate} onChange={setDueDate} />
+          <FloatField label="Due date" value={dueDate}>
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </FloatField>
         </div>
         <div>
           <span className="eyebrow">Applies to</span>
@@ -704,7 +706,9 @@ function AddFeeModal({ onClose, onSaved }: { onClose: () => void; onSaved: () =>
               <input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
             </FloatField>
           </div>
-          <DatePicker label="Due date" value={dueDate} onChange={setDueDate} />
+          <FloatField label="Due date" value={dueDate}>
+            <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} />
+          </FloatField>
         </div>
         <div>
           <span className="eyebrow">Applies to</span>

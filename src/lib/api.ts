@@ -1,3 +1,4 @@
+
 const API_BASE = import.meta.env.VITE_API_URL || "https://localhost:7050/api";
 
 export type Role = "Admin" | "Treasurer" | "Officer" | "ClassRepresentative" | "Adviser";
@@ -202,7 +203,6 @@ export interface StudentFeePaymentDto {
   paymentDate: string;
   paymentMethod: PaymentMethod;
   isRefund: boolean;
-  hasReceipt: boolean;
   reference?: string | null;
   notes?: string | null;
   recordedByName?: string | null;
@@ -477,13 +477,13 @@ export const api = {
 
   // Fee payments
   recordFeePayment: (studentId: number, payload: RecordFeePaymentPayload) =>
-    request<{ message: string; data: StudentDto; paymentId: number }>(`/students/${studentId}/payments`, {
+    request<{ message: string; data: StudentDto }>(`/students/${studentId}/payments`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
   recordRefund: (studentId: number, payload: RecordRefundPayload) =>
-    request<{ message: string; data: StudentDto; paymentId: number }>(`/students/${studentId}/refunds`, {
+    request<{ message: string; data: StudentDto }>(`/students/${studentId}/refunds`, {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -492,31 +492,6 @@ export const api = {
     request<StudentFeePaymentDto[]>(
       `/students/payments${toQuery(params as unknown as Record<string, string | undefined>)}`,
     ),
-
-  uploadReceipt: async (paymentId: number, file: File) => {
-    const token = getToken();
-    const form = new FormData();
-    form.append("file", file);
-    const res = await fetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-      body: form,
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new ApiError(body.message || "Failed to attach receipt photo.", res.status);
-    }
-    return res.json() as Promise<{ message: string }>;
-  },
-
-  fetchReceiptBlob: async (paymentId: number): Promise<Blob> => {
-    const token = getToken();
-    const res = await fetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-    });
-    if (!res.ok) throw new ApiError("Couldn't load the receipt photo.", res.status);
-    return res.blob();
-  },
 
   getStudentFees: (studentId: number) =>
     request<StudentFeeStatusDto[]>(`/students/${studentId}/fees`),

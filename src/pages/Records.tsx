@@ -5,8 +5,6 @@ import { api, type FundRecordDto, type UpdateRecordPayload, PAYMENT_METHODS } fr
 import { Search, Pencil, X, ArrowUpRight, ArrowDownRight, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { SelectPicker } from "@/components/select-picker";
-import { DatePicker } from "@/components/date-picker";
-import { ReferenceNumberField } from "@/components/reference-field";
 import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 
 export default function RecordsPage() {
@@ -272,7 +270,9 @@ function EditModal({
               <FloatField label="Bank name / type" value={bankName}>
                 <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
               </FloatField>
-              <ReferenceNumberField label="Reference number (optional)" value={bankRef} onChange={setBankRef} />
+              <FloatField label="Reference number (optional)" value={bankRef}>
+                <input value={bankRef} onChange={(e) => setBankRef(e.target.value)} maxLength={50} placeholder="REF-000123" />
+              </FloatField>
             </div>
           )}
           <FloatField label="Notes" value={notes}>

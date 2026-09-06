@@ -2,13 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { useAuth, formatPHP } from "@/lib/auth-context";
 import { SelectPicker } from "@/components/select-picker";
-import { DatePicker } from "@/components/date-picker";
-import { ReferenceNumberField } from "@/components/reference-field";
 import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 import { EyeGlyph } from "@/components/pw-input";
 import {
   api,
-  ApiError,
   PAYMENT_METHODS,
   type StudentDto,
   type StudentFeeStatusDto,
@@ -32,7 +29,6 @@ import {
   CircleDot,
   Pencil,
   Trash2,
-  ImageOff,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn, toTitleCase } from "@/lib/utils";
@@ -656,7 +652,6 @@ function StudentDetailModal({
 }) {
   const [fees, setFees] = useState<StudentFeeStatusDto[] | null>(null);
   const [history, setHistory] = useState<StudentFeePaymentDto[] | null>(null);
-  const [viewingReceipt, setViewingReceipt] = useState<StudentFeePaymentDto | null>(null);
 
   useEffect(() => {
     api
@@ -736,14 +731,7 @@ function StudentDetailModal({
           ) : (
             <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
               {history.map((p) => (
-                <div
-                  key={p.paymentId}
-                  onClick={p.reference ? () => setViewingReceipt(p) : undefined}
-                  className={cn(
-                    "flex items-center justify-between rounded-lg bg-muted/40 px-3.5 py-2.5 transition",
-                    p.reference && "cursor-pointer hover:bg-muted/70",
-                  )}
-                >
+                <div key={p.paymentId} className="flex items-center justify-between rounded-lg bg-muted/40 px-3.5 py-2.5">
                   <div className="min-w-0">
                     <div className="text-sm truncate">
                       {p.feeName}
@@ -775,115 +763,7 @@ function StudentDetailModal({
           </button>
         )}
       </div>
-      {viewingReceipt && <ReceiptViewerModal payment={viewingReceipt} onClose={() => setViewingReceipt(null)} />}
     </ModalShell>
-  );
-}
-
-function ReceiptViewerModal({ payment, onClose }: { payment: StudentFeePaymentDto; onClose: () => void }) {
-  const [imgUrl, setImgUrl] = useState<string | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
-
-  useEffect(() => {
-    let objectUrl: string | null = null;
-    let cancelled = false;
-    (async () => {
-      try {
-        const blob = await api.fetchReceiptBlob(payment.paymentId);
-        objectUrl = URL.createObjectURL(blob);
-        if (!cancelled) {
-          setImgUrl(objectUrl);
-          setState("ready");
-        }
-      } catch (err) {
-        if (cancelled) return;
-        // A 404 here means this specific payment just never had a photo
-        // attached - that's a normal, expected outcome, not a failure.
-        setState(err instanceof ApiError && err.status === 404 ? "missing" : "error");
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [payment.paymentId]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-[70] grid place-items-center p-4 md:p-8 bg-black/70 backdrop-blur-md animate-fade-in"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md surface-lift overflow-hidden shadow-2xl ring-1 ring-white/10 animate-scale-in"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header - who/what this receipt is for, so the photo has context */}
-        <div className="flex items-start justify-between gap-4 px-5 py-4 hairline-b bg-black/20">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold truncate flex items-center gap-2">
-              {payment.feeName}
-              {payment.isRefund && (
-                <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive shrink-0">
-                  Refund
-                </span>
-              )}
-            </div>
-            <div className="mono text-[11px] text-muted-foreground mt-0.5 truncate">
-              {new Date(payment.paymentDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} ·{" "}
-              {payment.paymentMethod}
-              {payment.reference ? ` · ${payment.reference}` : ""}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={cn("mono text-sm font-semibold", payment.isRefund ? "text-destructive" : "text-emerald")}>
-              {payment.isRefund ? "−" : ""}
-              {formatPHP(payment.amount)}
-            </span>
-            <button
-              onClick={onClose}
-              className="p-1.5 -m-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-
-        {/* Body - the photo itself, or a clear explanation of why there isn't one */}
-        <div className="bg-black/30 min-h-[16rem] grid place-items-center p-4">
-          {state === "missing" ? (
-            <div className="text-center py-10 px-4">
-              <ImageOff className="h-8 w-8 text-muted-foreground/60 mx-auto mb-3" />
-              <div className="text-sm text-muted-foreground">No photo available</div>
-              <div className="text-xs text-muted-foreground/70 mt-1 max-w-xs">
-                This payment was recorded without an attached reference photo.
-              </div>
-            </div>
-          ) : state === "error" ? (
-            <div className="text-center py-10 px-4">
-              <ImageOff className="h-8 w-8 text-destructive/60 mx-auto mb-3" />
-              <div className="text-sm text-muted-foreground">Couldn't load the receipt photo.</div>
-              <div className="text-xs text-muted-foreground/70 mt-1">Please try again in a moment.</div>
-            </div>
-          ) : state === "ready" && imgUrl ? (
-            <img src={imgUrl} alt={`Receipt for ${payment.feeName}`} className="max-h-[70vh] w-full object-contain rounded-lg" />
-          ) : (
-            <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground">
-              <div className="h-6 w-6 rounded-full border-2 border-current border-t-transparent animate-spin" />
-              <div className="text-xs">Loading photo…</div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -897,14 +777,12 @@ function RecordPaymentModal({
   onSaved: () => void;
 }) {
   const [fees, setFees] = useState<StudentFeeStatusDto[] | null>(null);
-  const [feeSearch, setFeeSearch] = useState("");
   const [feeId, setFeeId] = useState<number | null>(null);
   const [amount, setAmount] = useState("");
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [method, setMethod] = useState<PaymentMethod>("Cash");
   const [reference, setReference] = useState("");
   const [bankName, setBankName] = useState("");
-  const [capturedFile, setCapturedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -923,15 +801,6 @@ function RecordPaymentModal({
 
   const selectedFee = fees?.find((f) => f.feeId === feeId) ?? null;
 
-  const visibleFees =
-    fees === null
-      ? null
-      : fees.filter((f) => {
-          if (!feeSearch.trim()) return true;
-          const q = feeSearch.trim().toLowerCase();
-          return f.feeName.toLowerCase().includes(q) || f.feeCategory.toLowerCase().includes(q);
-        });
-
   const pickFee = (f: StudentFeeStatusDto) => {
     setFeeId(f.feeId);
     setAmount(String(f.balance));
@@ -947,7 +816,7 @@ function RecordPaymentModal({
 
     setSubmitting(true);
     try {
-      const result = await api.recordFeePayment(student.studentId, {
+      await api.recordFeePayment(student.studentId, {
         feeId,
         amount: amt,
         paymentDate: date,
@@ -959,16 +828,7 @@ function RecordPaymentModal({
               ? reference.trim()
               : undefined,
       });
-      let photoAttached = false;
-      if (capturedFile) {
-        try {
-          await api.uploadReceipt(result.paymentId, capturedFile);
-          photoAttached = true;
-        } catch {
-          toast.error("Payment saved, but the receipt photo couldn't be attached.");
-        }
-      }
-      toast.success(photoAttached ? "Payment recorded — photo attached" : "Payment recorded");
+      toast.success("Payment recorded");
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to record payment");
@@ -980,15 +840,6 @@ function RecordPaymentModal({
   return (
     <ModalShell title="Collect payment" subtitle={`${toTitleCase(student.fullName)} (${student.studentNumber}) · Year ${student.yearLevel}`} onClose={onClose}>
       <form onSubmit={submit} className="space-y-4">
-        <div className="relative">
-          <Search className="h-3.5 w-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input
-            value={feeSearch}
-            onChange={(e) => setFeeSearch(e.target.value)}
-            placeholder="Search fees…"
-            className="w-full bg-transparent border border-border/70 rounded-lg pl-9 pr-3 py-2 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-emerald/50 transition"
-          />
-        </div>
         <div>
           <span className="eyebrow">Fee</span>
           <div className="mt-2 space-y-2 max-h-56 overflow-y-auto pr-1">
@@ -996,10 +847,8 @@ function RecordPaymentModal({
               <div className="text-xs text-muted-foreground">Loading fees…</div>
             ) : fees.length === 0 ? (
               <div className="text-xs text-muted-foreground">No fees apply to this student yet.</div>
-            ) : visibleFees !== null && visibleFees.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No fees match "{feeSearch}".</div>
             ) : (
-              (visibleFees ?? []).map((f) => (
+              fees.map((f) => (
                 <button
                   key={f.feeId}
                   type="button"
@@ -1031,7 +880,9 @@ function RecordPaymentModal({
           <FloatField label="Amount (PHP)" value={amount}>
             <input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
           </FloatField>
-          <DatePicker label="Date" value={date} onChange={setDate} disablePast />
+          <FloatField label="Date" value={date}>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </FloatField>
         </div>
         <SelectPicker
           label="Payment method"
@@ -1045,34 +896,9 @@ function RecordPaymentModal({
           </FloatField>
         )}
         {method !== "Cash" && (
-          <ReferenceNumberField
-            label="Reference number"
-            value={reference}
-            onChange={setReference}
-            onFileCaptured={setCapturedFile}
-            required
-          />
-        )}
-        {method !== "Cash" && (
-          <div className={cn("text-xs flex items-center gap-1.5", capturedFile ? "text-emerald" : "text-muted-foreground")}>
-            {capturedFile ? (
-              <>
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Photo ready to attach: {capturedFile.name}</span>
-                <button
-                  type="button"
-                  onClick={() => setCapturedFile(null)}
-                  className="ml-1 p-0.5 rounded text-muted-foreground hover:text-destructive transition shrink-0"
-                  title="Remove photo"
-                  aria-label="Remove attached photo"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </>
-            ) : (
-              <>No photo attached yet — click the paperclip above to add one.</>
-            )}
-          </div>
+          <FloatField label="Reference number" value={reference}>
+            <input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={50} placeholder="REF-000123" />
+          </FloatField>
         )}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="btn btn-ghost">

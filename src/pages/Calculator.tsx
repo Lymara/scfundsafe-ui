@@ -3,7 +3,6 @@ import { AppLayout } from "@/components/app-layout";
 import { formatPHP } from "@/lib/auth-context";
 import { api, type FeeDto } from "@/lib/api";
 import { SelectPicker } from "@/components/select-picker";
-import { DatePicker } from "@/components/date-picker";
 import { Calculator as CalculatorIcon, Delete, AlertTriangle, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -319,7 +318,9 @@ function FinesCalculator() {
                     onChange={(e) => setFinePerDayEvent(e.target.value)}
                   />
                 </FloatField>
-                <DatePicker label="Calculate until" value={calculateUntil} onChange={setCalculateUntil} />
+                <FloatField label="Calculate until" value={calculateUntil}>
+                  <input type="date" value={calculateUntil} onChange={(e) => setCalculateUntil(e.target.value)} />
+                </FloatField>
               </div>
 
               <ResultCard
@@ -335,8 +336,12 @@ function FinesCalculator() {
       ) : (
         <div className="surface-lift p-8 space-y-6">
           <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-            <DatePicker label="Start date" value={startDate} onChange={setStartDate} />
-            <DatePicker label="End date" value={endDate} onChange={setEndDate} />
+            <FloatField label="Start date" value={startDate}>
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </FloatField>
+            <FloatField label="End date" value={endDate}>
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </FloatField>
           </div>
           <FloatField label="Fine per day (PHP)" value={finePerDayCustom}>
             <input type="number" step="0.01" min="0" value={finePerDayCustom} onChange={(e) => setFinePerDayCustom(e.target.value)} />

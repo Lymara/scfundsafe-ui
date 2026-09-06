@@ -26,8 +26,6 @@ import {
 import { toast } from "sonner";
 import { cn, toTitleCase } from "@/lib/utils";
 import { SelectPicker } from "@/components/select-picker";
-import { DatePicker } from "@/components/date-picker";
-import { ReferenceNumberField } from "@/components/reference-field";
 import { Pagination, paginate } from "@/components/pagination";
 
 export default function ExpensePage() {
@@ -198,7 +196,9 @@ function ExpenseForm() {
                 <FloatField label="Bank name / type" value={bankName}>
                   <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
                 </FloatField>
-                <ReferenceNumberField label="Reference number (optional)" value={bankRef} onChange={setBankRef} />
+                <FloatField label="Reference number (optional)" value={bankRef}>
+                  <input value={bankRef} onChange={(e) => setBankRef(e.target.value)} maxLength={50} placeholder="REF-000123" />
+                </FloatField>
               </div>
             )}
           </div>
@@ -475,7 +475,6 @@ function RefundFormModal({
   const [method, setMethod] = useState<PaymentMethod>("Cash");
   const [reference, setReference] = useState("");
   const [bankName, setBankName] = useState("");
-  const [capturedFile, setCapturedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (e: React.FormEvent) => {
@@ -488,7 +487,7 @@ function RefundFormModal({
 
     setSubmitting(true);
     try {
-      const result = await api.recordRefund(student.studentId, {
+      await api.recordRefund(student.studentId, {
         feeId: fee.feeId,
         amount: amt,
         refundDate: date,
@@ -500,16 +499,7 @@ function RefundFormModal({
               ? reference.trim()
               : undefined,
       });
-      let photoAttached = false;
-      if (capturedFile) {
-        try {
-          await api.uploadReceipt(result.paymentId, capturedFile);
-          photoAttached = true;
-        } catch {
-          toast.error("Refund saved, but the receipt photo couldn't be attached.");
-        }
-      }
-      toast.success(photoAttached ? "Refund recorded — photo attached" : "Refund recorded");
+      toast.success("Refund recorded");
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to record refund");
@@ -544,7 +534,9 @@ function RefundFormModal({
           <FloatField label="Refund amount (PHP)" value={amount}>
             <input type="number" step="0.01" min="0" max={student.amountPaid} value={amount} onChange={(e) => setAmount(e.target.value)} />
           </FloatField>
-          <DatePicker label="Date" value={date} onChange={setDate} disablePast />
+          <FloatField label="Date" value={date}>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+          </FloatField>
         </div>
         <SelectPicker
           label="Payment method"
@@ -558,34 +550,9 @@ function RefundFormModal({
           </FloatField>
         )}
         {method !== "Cash" && (
-          <ReferenceNumberField
-            label="Reference number"
-            value={reference}
-            onChange={setReference}
-            onFileCaptured={setCapturedFile}
-            required
-          />
-        )}
-        {method !== "Cash" && (
-          <div className={cn("text-xs flex items-center gap-1.5", capturedFile ? "text-emerald" : "text-muted-foreground")}>
-            {capturedFile ? (
-              <>
-                <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
-                <span className="truncate">Photo ready to attach: {capturedFile.name}</span>
-                <button
-                  type="button"
-                  onClick={() => setCapturedFile(null)}
-                  className="ml-1 p-0.5 rounded text-muted-foreground hover:text-destructive transition shrink-0"
-                  title="Remove photo"
-                  aria-label="Remove attached photo"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </>
-            ) : (
-              <>No photo attached yet — click the paperclip above to add one.</>
-            )}
-          </div>
+          <FloatField label="Reference number" value={reference}>
+            <input value={reference} onChange={(e) => setReference(e.target.value)} maxLength={50} placeholder="REF-000123" />
+          </FloatField>
         )}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" onClick={onClose} className="btn btn-ghost">

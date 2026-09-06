@@ -245,62 +245,18 @@
   outline: none;
   transition: border-color .25s ease, box-shadow .25s ease;
 }
-.field textarea { resize: none; min-height: 4.5rem; }
-
-/* Chrome/Edge forces a white background (plus black text) on any field it
-   recognizes for autofill - typically password fields, but also email/
-   username fields on a form it thinks is a login. The long transition delay
-   stops the forced color from flashing back in as soon as the field is
-   focused/typed into again. Applies everywhere, not just inside .field,
-   since PwInput's <input> isn't always wrapped in one. */
-input:-webkit-autofill,
-input:-webkit-autofill:hover,
-input:-webkit-autofill:focus,
-input:-webkit-autofill:active,
-textarea:-webkit-autofill,
-select:-webkit-autofill {
-  -webkit-text-fill-color: var(--foreground) !important;
-  -webkit-box-shadow: 0 0 0 1000px var(--input) inset !important;
-  box-shadow: 0 0 0 1000px var(--input) inset !important;
-  caret-color: var(--foreground) !important;
-  border: none !important;
-  outline: none !important;
-  border-radius: inherit;
-  transition: background-color 600000s ease-in-out 0s, color 600000s ease-in-out 0s;
-}
-/* The floating-label field variant keeps its own bottom border instead of
-   the fully-borderless reset above, so its autofilled state should too.
-   Descendant selector (not ">") on purpose - PwInput wraps its <input> in
-   an extra <span>, so a direct-child selector would silently miss it. */
-.field input:-webkit-autofill,
-.field input:-webkit-autofill:hover,
-.field input:-webkit-autofill:focus,
-.field input:-webkit-autofill:active {
-  border-bottom: 1.5px solid oklch(0.98 0.01 150 / 0.14) !important;
-}
-.field:focus-within input:-webkit-autofill {
-  border-bottom-color: var(--emerald) !important;
-}
-/* Firefox's unprefixed equivalent - no forced background to fight, but keep
-   the text/caret color consistent regardless. */
-input:autofill,
-textarea:autofill,
-select:autofill {
-  -moz-text-fill-color: var(--foreground);
-  caret-color: var(--foreground);
-}
-
+.field > textarea { resize: none; min-height: 4.5rem; }
 /* Hint text (native placeholder) sits in the same spot as the floating
    label while a field is empty and unfocused, so the two texts would
    otherwise print on top of each other. Keep the hint invisible until
    the label has floated out of the way (on focus or once filled). */
-.field input::placeholder,
-.field textarea::placeholder {
+.field > input::placeholder,
+.field > textarea::placeholder {
   color: transparent;
   transition: color .2s ease;
 }
-.field:focus-within input::placeholder,
-.field:focus-within textarea::placeholder {
+.field:focus-within > input::placeholder,
+.field:focus-within > textarea::placeholder {
   color: var(--muted-foreground);
   opacity: 0.7;
 }
@@ -337,9 +293,9 @@ select:autofill {
    isn't reachable through ::placeholder, so it can't be hidden the way the
    rule above hides one. The label is kept floated above it at all times
    instead, the same way it already is for the custom Select dropdown. */
-.field:focus-within input,
-.field:focus-within textarea,
-.field:focus-within select {
+.field:focus-within > input,
+.field:focus-within > textarea,
+.field:focus-within > select {
   border-bottom-color: var(--emerald);
   box-shadow: 0 1px 0 0 var(--emerald);
 }

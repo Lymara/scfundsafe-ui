@@ -5,7 +5,6 @@ import { api, type FundRecordDto, type FeeDto, type StudentDto, type YearLevel }
 import { FileBarChart, Printer, Download, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { toTitleCase } from "@/lib/utils";
-import { DatePicker } from "@/components/date-picker";
 import bitsLogo from "@/assets/bits-logo.png";
 
 export default function ReportsPage() {
@@ -213,9 +212,19 @@ function ReportsView() {
           </div>
           {period === "custom" && (
             <div className="flex items-center gap-2">
-              <DatePicker value={from} onChange={setFrom} dense placeholder="From" />
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="mono text-xs bg-transparent border-b border-border py-1.5 outline-none focus:border-emerald transition"
+              />
               <span className="text-xs text-muted-foreground">→</span>
-              <DatePicker value={to} onChange={setTo} dense placeholder="To" />
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="mono text-xs bg-transparent border-b border-border py-1.5 outline-none focus:border-emerald transition"
+              />
             </div>
           )}
           <div className="flex-1" />
