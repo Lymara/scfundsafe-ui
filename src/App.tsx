@@ -8,13 +8,16 @@ import ExpensePage from "@/pages/Expenses";
 import RecordsPage from "@/pages/Records";
 import ReportsPage from "@/pages/Reports";
 import SettingsPage from "@/pages/Settings";
+import StudentsPage from "@/pages/Students";
+import PaymentsPage from "@/pages/Payments";
+import CalculatorPage from "@/pages/Calculator";
 
 function IndexRedirect() {
   const { currentUser, hydrated } = useAuth();
   if (!hydrated) {
     return (
       <div className="min-h-screen grid place-items-center">
-        <div className="text-muted-foreground text-sm">Loading SC FundSafe…</div>
+        <div className="text-muted-foreground text-sm">Loading IT FundSafe…</div>
       </div>
     );
   }
@@ -34,6 +37,9 @@ export default function App() {
           <Route path="/records" element={<RecordsPage />} />
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/students" element={<StudentsPage />} />
+          <Route path="/payments" element={<PaymentsPage />} />
+          <Route path="/calculator" element={<CalculatorPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

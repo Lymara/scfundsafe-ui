@@ -6,14 +6,18 @@ export function PwInput({
   value,
   onChange,
   autoComplete,
+  hideButtonWhenEmpty = false,
 }: {
   value: string;
   onChange: (s: string) => void;
   autoComplete?: string;
+  /** When true, the eye button only appears once the user has typed something. */
+  hideButtonWhenEmpty?: boolean;
 }) {
   const [show, setShow] = useState(false);
   const reveal = () => setShow(true);
   const hide = () => setShow(false);
+  const showButton = !hideButtonWhenEmpty || value.length > 0;
 
   return (
     <span className="relative block">
@@ -22,31 +26,33 @@ export function PwInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         autoComplete={autoComplete}
-        style={{ paddingRight: "2.25rem" }}
+        style={{ paddingRight: showButton ? "2.25rem" : undefined }}
       />
-      <button
-        type="button"
-        tabIndex={-1}
-        onMouseDown={reveal}
-        onMouseUp={hide}
-        onMouseLeave={hide}
-        onTouchStart={(e) => {
-          e.preventDefault();
-          reveal();
-        }}
-        onTouchEnd={hide}
-        onTouchCancel={hide}
-        onBlur={hide}
-        className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition select-none"
-        aria-label={show ? "Password visible — release to hide" : "Hold to show password"}
-      >
-        <EyeGlyph className="h-4 w-4" />
-      </button>
+      {showButton && (
+        <button
+          type="button"
+          tabIndex={-1}
+          onMouseDown={reveal}
+          onMouseUp={hide}
+          onMouseLeave={hide}
+          onTouchStart={(e) => {
+            e.preventDefault();
+            reveal();
+          }}
+          onTouchEnd={hide}
+          onTouchCancel={hide}
+          onBlur={hide}
+          className="absolute right-1 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition select-none"
+          aria-label={show ? "Password visible — release to hide" : "Hold to show password"}
+        >
+          <EyeGlyph className="h-4 w-4" />
+        </button>
+      )}
     </span>
   );
 }
 
-function EyeGlyph({ className }: { className?: string }) {
+export function EyeGlyph({ className }: { className?: string }) {
   return (
     <svg
       viewBox="0 0 24 24"

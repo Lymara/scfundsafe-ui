@@ -47,7 +47,7 @@
 }
 
 /* ============================================================
-   PROFESSIONAL DARK — SC FundSafe
+   PROFESSIONAL DARK — IT FundSafe
    Deep near-black base, emerald primary, subtle gold accent.
    ============================================================ */
 :root {
@@ -231,9 +231,9 @@
   display: block;
   padding-top: 1.15rem;
 }
-.field > input,
-.field > textarea,
-.field > select {
+.field input,
+.field textarea,
+.field select {
   width: 100%;
   background: transparent;
   border: 0;
@@ -245,7 +245,65 @@
   outline: none;
   transition: border-color .25s ease, box-shadow .25s ease;
 }
-.field > textarea { resize: none; min-height: 4.5rem; }
+.field textarea { resize: none; min-height: 4.5rem; }
+
+/* Chrome/Edge forces a white background (plus black text) on any field it
+   recognizes for autofill - typically password fields, but also email/
+   username fields on a form it thinks is a login. The long transition delay
+   stops the forced color from flashing back in as soon as the field is
+   focused/typed into again. Applies everywhere, not just inside .field,
+   since PwInput's <input> isn't always wrapped in one. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active,
+textarea:-webkit-autofill,
+select:-webkit-autofill {
+  -webkit-text-fill-color: var(--foreground) !important;
+  -webkit-box-shadow: 0 0 0 1000px var(--input) inset !important;
+  box-shadow: 0 0 0 1000px var(--input) inset !important;
+  caret-color: var(--foreground) !important;
+  border: none !important;
+  outline: none !important;
+  border-radius: inherit;
+  transition: background-color 600000s ease-in-out 0s, color 600000s ease-in-out 0s;
+}
+/* The floating-label field variant keeps its own bottom border instead of
+   the fully-borderless reset above, so its autofilled state should too.
+   Descendant selector (not ">") on purpose - PwInput wraps its <input> in
+   an extra <span>, so a direct-child selector would silently miss it. */
+.field input:-webkit-autofill,
+.field input:-webkit-autofill:hover,
+.field input:-webkit-autofill:focus,
+.field input:-webkit-autofill:active {
+  border-bottom: 1.5px solid oklch(0.98 0.01 150 / 0.14) !important;
+}
+.field:focus-within input:-webkit-autofill {
+  border-bottom-color: var(--emerald) !important;
+}
+/* Firefox's unprefixed equivalent - no forced background to fight, but keep
+   the text/caret color consistent regardless. */
+input:autofill,
+textarea:autofill,
+select:autofill {
+  -moz-text-fill-color: var(--foreground);
+  caret-color: var(--foreground);
+}
+
+/* Hint text (native placeholder) sits in the same spot as the floating
+   label while a field is empty and unfocused, so the two texts would
+   otherwise print on top of each other. Keep the hint invisible until
+   the label has floated out of the way (on focus or once filled). */
+.field input::placeholder,
+.field textarea::placeholder {
+  color: transparent;
+  transition: color .2s ease;
+}
+.field:focus-within input::placeholder,
+.field:focus-within textarea::placeholder {
+  color: var(--muted-foreground);
+  opacity: 0.7;
+}
 .field > select {
   appearance: none;
   background-image: linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
@@ -266,16 +324,22 @@
   transform-origin: left top;
 }
 .field.is-filled > .field-label,
-.field:focus-within > .field-label {
+.field:focus-within > .field-label,
+.field:has(> input[type="date"]) > .field-label {
   transform: translateY(-1.35rem) scale(0.78);
   color: var(--emerald);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   font-weight: 600;
 }
-.field:focus-within > input,
-.field:focus-within > textarea,
-.field:focus-within > select {
+/* A native date input always shows its own "dd/mm/yyyy" placeholder even
+   when nothing has been picked yet - unlike text inputs, that placeholder
+   isn't reachable through ::placeholder, so it can't be hidden the way the
+   rule above hides one. The label is kept floated above it at all times
+   instead, the same way it already is for the custom Select dropdown. */
+.field:focus-within input,
+.field:focus-within textarea,
+.field:focus-within select {
   border-bottom-color: var(--emerald);
   box-shadow: 0 1px 0 0 var(--emerald);
 }
@@ -284,6 +348,29 @@
   font-size: 0.7rem;
   color: var(--muted-foreground);
   letter-spacing: 0.02em;
+}
+
+/* Supports a <button> used as a custom dropdown trigger (e.g. the fee
+   category picker) so it matches the same floating-label field styling.
+   Additive only - does not alter any existing rule above. */
+.field > button.field-trigger {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-bottom: 1.5px solid oklch(0.98 0.01 150 / 0.14);
+  border-radius: 0;
+  padding: 0.6rem 0 0.6rem 0;
+  color: var(--foreground);
+  font-size: 0.95rem;
+  outline: none;
+  cursor: pointer;
+  transition: border-color .25s ease, box-shadow .25s ease;
+}
+.field:focus-within > button.field-trigger {
+  border-bottom-color: var(--emerald);
+  box-shadow: 0 1px 0 0 var(--emerald);
 }
 
 /* --- buttons --- */
@@ -387,6 +474,38 @@
 }
 .dot-pulse { animation: soft-pulse 2.2s ease-in-out infinite; }
 
+/* slow drifting blobs + panning gradient wash - used on the login screen for
+   a "live" background without being distracting */
+@keyframes drift-a {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(4%, -6%) scale(1.08); }
+}
+@keyframes drift-b {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  50%      { transform: translate(-5%, 5%) scale(1.1); }
+}
+@keyframes drift-c {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50%      { transform: translate(-50%, -50%) scale(1.15); }
+}
+@keyframes gradient-pan {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.animate-drift-a { animation: drift-a 16s ease-in-out infinite; }
+.animate-drift-b { animation: drift-b 20s ease-in-out infinite; }
+.animate-drift-c { animation: drift-c 14s ease-in-out infinite; }
+.animate-gradient-pan {
+  background-size: 200% 200%;
+  animation: gradient-pan 18s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-drift-a, .animate-drift-b, .animate-drift-c, .animate-gradient-pan, .dot-pulse {
+    animation: none;
+  }
+}
+
 /* subtle grid backdrop for hero */
 @utility grid-backdrop {
   background-image:
@@ -398,11 +517,41 @@
 }
 
 @media print {
+  @page {
+    size: A4;
+    margin: 14mm 12mm;
+  }
+
   body { background: white !important; color: black !important; }
-  aside, .print\:hidden { display: none !important; }
+  .print\:hidden { display: none !important; }
   .gradient-text {
     background: none !important;
     -webkit-text-fill-color: var(--emerald) !important;
     color: var(--emerald) !important;
   }
+
+  /* The app shell is a fixed-height, scroll-clipped layout on screen (by
+     design, for the sidebar nav). For print, let it flow naturally so the
+     browser can paginate the full report across as many physical pages as
+     it needs, instead of clipping to whatever fit in the on-screen viewport. */
+  html, body { height: auto !important; }
+  #app-shell {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  #app-shell > aside { display: none !important; }
+  #app-shell > main {
+    display: block !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding-top: 0 !important;
+  }
+  #app-shell .md\:hidden { display: none !important; }
+
+  /* Keep individual rows/cards from being sliced across a page break. */
+  table { break-inside: auto; }
+  tr, .print-avoid-break { break-inside: avoid; }
+  thead { display: table-header-group; }
+  .print-page-break { break-before: page; }
 }
