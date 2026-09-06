@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import {
   LayoutDashboard,
@@ -11,18 +11,50 @@ import {
   LogOut,
   ShieldCheck,
   Settings as SettingsIcon,
+  GraduationCap,
+  Receipt,
+  Wallet,
+  Calculator,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/api";
-import dmcLogo from "@/assets/dmc-logo.png";
+import bitsLogo from "@/assets/bits-logo.png";
 
-const nav: { to: string; label: string; icon: typeof LayoutDashboard; roles?: Role[] }[] = [
-  { to: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { to: "/income", label: "Record Income", icon: TrendingUp, roles: ["Treasurer"] },
-  { to: "/expenses", label: "Record Expense", icon: TrendingDown, roles: ["Treasurer"] },
-  { to: "/records", label: "Records", icon: Search },
-  { to: "/reports", label: "Reports", icon: FileBarChart },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
+type NavLeaf = { to: string; label: string; icon: typeof LayoutDashboard; roles?: Role[] };
+type NavGroup = { key: string; label: string; icon: typeof LayoutDashboard; standalone?: boolean; items: NavLeaf[] };
+
+const navGroups: NavGroup[] = [
+  { key: "overview", label: "Overview", icon: LayoutDashboard, standalone: true, items: [{ to: "/dashboard", label: "Overview", icon: LayoutDashboard }] },
+  {
+    key: "students",
+    label: "Students",
+    icon: GraduationCap,
+    items: [
+      { to: "/students", label: "Roster", icon: GraduationCap },
+      { to: "/payments", label: "Payments", icon: Receipt },
+    ],
+  },
+  {
+    key: "treasury",
+    label: "Treasury",
+    icon: Wallet,
+    items: [
+      { to: "/income", label: "Record Income", icon: TrendingUp, roles: ["Treasurer"] },
+      { to: "/expenses", label: "Record Expense", icon: TrendingDown, roles: ["Treasurer"] },
+      { to: "/records", label: "Records", icon: Search },
+    ],
+  },
+  {
+    key: "insights",
+    label: "Insights",
+    icon: FileBarChart,
+    items: [
+      { to: "/reports", label: "Reports", icon: FileBarChart },
+      { to: "/calculator", label: "Calculator", icon: Calculator },
+    ],
+  },
+  { key: "settings", label: "Settings", icon: SettingsIcon, standalone: true, items: [{ to: "/settings", label: "Settings", icon: SettingsIcon }] },
 ];
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -35,9 +67,36 @@ export function AppLayout({ children }: { children: ReactNode }) {
     if (!currentUser) navigate("/auth");
   }, [currentUser, navigate]);
 
+  // Groups visible to this role (a group with zero visible items after role
+  // filtering - e.g. "Treasury" for a non-Treasurer, minus its Treasurer-only
+  // leaves - still shows if at least one item remains, like Records).
+  const visibleGroups = navGroups
+    .map((g) => ({ ...g, items: g.items.filter((item) => !item.roles || (currentUser && item.roles.includes(currentUser.role))) }))
+    .filter((g) => g.items.length > 0);
+
+  // The group containing the current page starts expanded; the rest start
+  // collapsed, so the sidebar stays compact without hiding where you are.
+  const activeGroupKey = visibleGroups.find((g) => g.items.some((item) => item.to === pathname))?.key;
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => new Set(activeGroupKey ? [activeGroupKey] : []));
+
+  useEffect(() => {
+    if (activeGroupKey) {
+      setOpenGroups((prev) => (prev.has(activeGroupKey) ? prev : new Set(prev).add(activeGroupKey)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
+
+  const toggleGroup = (key: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
   if (!currentUser) return null;
 
-  const visibleNav = nav.filter((item) => !item.roles || item.roles.includes(currentUser.role));
+  const flatMobileItems = visibleGroups.flatMap((g) => g.items);
 
   const initials = currentUser.fullName
     .split(" ")
@@ -51,8 +110,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
     navigate("/auth");
   };
 
+  let rowNumber = 0;
+
   return (
-    <div className="h-screen flex text-foreground overflow-hidden">
+    <div id="app-shell" className="h-screen flex text-foreground overflow-hidden">
       {/* Sidebar */}
       <aside className="hidden md:flex w-[272px] shrink-0 flex-col h-screen overflow-hidden border-r border-border/60 bg-sidebar relative">
         {/* backdrop glow */}
@@ -65,16 +126,16 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div className="relative px-6 pt-7 pb-6">
           <div className="flex items-center gap-3">
             <div className="relative h-11 w-11 rounded-xl grid place-items-center bg-gradient-to-br from-emerald/25 to-emerald/5 ring-1 ring-emerald/30">
-              <img src={dmcLogo} alt="DMC College Foundation" className="h-8 w-8 object-contain" loading="eager" />
+              <img src={bitsLogo} alt="BSIT Department" className="h-8 w-8 object-contain" loading="eager" />
               <span className="absolute -bottom-1 -right-1 h-3.5 w-3.5 rounded-full bg-amber ring-2 ring-sidebar grid place-items-center">
                 <ShieldCheck className="h-2 w-2 text-[oklch(0.18_0.03_60)]" />
               </span>
             </div>
             <div className="min-w-0">
               <div className="display text-xl leading-none">
-                SC <span className="gradient-text">FundSafe</span>
+                IT <span className="gradient-text">FundSafe</span>
               </div>
-              <div className="mono text-[10px] text-muted-foreground/80 mt-1 truncate">DMC College Foundation</div>
+              <div className="mono text-[10px] text-muted-foreground/80 mt-1 truncate">BSIT Department Council</div>
             </div>
           </div>
         </div>
@@ -85,15 +146,86 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div className="relative px-4 pt-5 flex-1 overflow-y-auto">
           <div className="eyebrow px-2 mb-2">Menu</div>
           <nav className="space-y-0.5">
-            {visibleNav.map((item, i) => {
-              const active = pathname === item.to;
-              const Icon = item.icon;
+            {visibleGroups.map((group) => {
+              if (group.standalone) {
+                const item = group.items[0];
+                const active = pathname === item.to;
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    className={cn(
+                      "rail-item group transition-colors hover:bg-emerald/10 rounded-md",
+                      active && "is-active"
+                    )}
+                  >
+                    {/* Icon gets the highlight color */}
+                    <Icon
+                      className={cn(
+                        "h-4 w-4 transition-transform group-hover:-translate-y-px",
+                        active && "text-yellow-400"
+                      )}
+                    />
+                    <span className="flex-1">{item.label}</span>
+                  </Link>
+                );
+              }
+
+              const isOpen = openGroups.has(group.key);
+              const GroupIcon = group.icon;
+              const hasActiveChild = group.items.some((item) => item.to === pathname);
+
               return (
-                <Link key={item.to} to={item.to} className={cn("rail-item group", active && "is-active")}>
-                  <span className="rail-num">{String(i + 1).padStart(2, "0")}</span>
-                  <Icon className={cn("h-4 w-4 transition-transform group-hover:-translate-y-px", active && "text-emerald")} />
-                  <span className="flex-1">{item.label}</span>
-                </Link>
+                <div key={group.key}>
+                  <button
+                    onClick={() => toggleGroup(group.key)}
+                    className={cn(
+                      "rail-item group w-full transition-colors hover:bg-emerald/10 rounded-md",
+                      hasActiveChild && !isOpen && "is-active"
+                    )}
+                  >
+                    <GroupIcon
+                      className={cn(
+                        "h-4 w-4 transition-transform group-hover:-translate-y-px",
+                        hasActiveChild && "text-yellow-400"
+                      )}
+                    />
+                    <span className="flex-1 text-left">{group.label}</span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 text-muted-foreground/60 transition-transform",
+                        isOpen && "rotate-180"
+                      )}
+                    />
+                  </button>
+                  {isOpen && (
+                    <div className="ml-4 pl-3 border-l border-border/60 space-y-0.5 mt-0.5 mb-1">
+                      {group.items.map((item) => {
+                        const active = pathname === item.to;
+                        const Icon = item.icon;
+                        return (
+                          <Link
+                            key={item.to}
+                            to={item.to}
+                            className={cn(
+                              "rail-item group !pl-2 transition-colors hover:bg-emerald/10 rounded-md",
+                              active && "is-active"
+                            )}
+                          >
+                            <Icon
+                              className={cn(
+                                "h-3.5 w-3.5 transition-transform group-hover:-translate-y-px",
+                                active && "text-yellow-400"
+                              )}
+                            />
+                            <span className="flex-1 text-[13px]">{item.label}</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </nav>
@@ -105,6 +237,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
             </div>
           </div>
         </div>
+
 
         <div className="relative p-4">
           <div className="surface p-3.5">
@@ -131,9 +264,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
       {/* Mobile top bar */}
       <div className="md:hidden print:hidden fixed top-0 inset-x-0 z-40 bg-sidebar/95 backdrop-blur-md hairline-b px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <img src={dmcLogo} alt="DMC" className="h-7 w-7 object-contain" />
+          <img src={bitsLogo} alt="BSIT" className="h-7 w-7 object-contain" />
           <span className="display text-lg">
-            SC <span className="gradient-text">FundSafe</span>
+            IT <span className="gradient-text">FundSafe</span>
           </span>
         </div>
         <button onClick={handleLogout} className="text-xs text-muted-foreground hover:text-destructive transition">
@@ -144,25 +277,27 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <main className="flex-1 min-w-0 pt-16 md:pt-0 overflow-y-auto">
         <div className="px-5 md:px-10 lg:px-14 py-8 md:py-12 max-w-6xl mx-auto">{children}</div>
 
-        {/* Mobile bottom nav */}
-        <div className="md:hidden print:hidden fixed bottom-0 inset-x-0 bg-sidebar/95 backdrop-blur-md hairline-t grid grid-cols-4 z-40">
-          {visibleNav.map((item) => {
-            const active = pathname === item.to;
-            const Icon = item.icon;
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  "flex flex-col items-center gap-1 py-2.5 text-[10px] transition",
-                  active ? "text-emerald" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {item.label.split(" ")[0]}
-              </Link>
-            );
-          })}
+        {/* Mobile bottom nav - flattened, horizontally scrollable so it holds up as items grow */}
+        <div className="md:hidden print:hidden fixed bottom-0 inset-x-0 bg-sidebar/95 backdrop-blur-md hairline-t z-40 overflow-x-auto">
+          <div className="flex" style={{ minWidth: "max-content" }}>
+            {flatMobileItems.map((item) => {
+              const active = pathname === item.to;
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  className={cn(
+                    "flex flex-col items-center gap-1 py-2.5 px-4 text-[10px] transition shrink-0",
+                    active ? "text-emerald" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <Icon className="h-4 w-4" />
+                  {item.label.split(" ")[0]}
+                </Link>
+              );
+            })}
+          </div>
         </div>
         <div className="md:hidden h-16" />
       </main>
