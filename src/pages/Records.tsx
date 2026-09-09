@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
-import { useAuth, formatPHP } from "@/lib/auth-context";
-import { api, type FundRecordDto, type UpdateRecordPayload, PAYMENT_METHODS } from "@/lib/api";
-import { Search, Pencil, X, ArrowUpRight, ArrowDownRight, ArrowRight } from "lucide-react";
+import { formatPHP } from "@/lib/auth-context";
+import { api, ApiError, type FundRecordDto, type FundRecordAttachmentDto } from "@/lib/api";
+import { Search, X, ArrowUpRight, ArrowDownRight, ImageOff, Loader2, Paperclip, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
-import { SelectPicker } from "@/components/select-picker";
 import { DatePicker } from "@/components/date-picker";
-import { ReferenceNumberField } from "@/components/reference-field";
 import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 
 export default function RecordsPage() {
@@ -18,16 +16,15 @@ export default function RecordsPage() {
 }
 
 function RecordsView() {
-  const { currentUser } = useAuth();
-  const canEdit = currentUser?.role === "Treasurer";
-
   const [records, setRecords] = useState<FundRecordDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
   const [type, setType] = useState<"all" | "Income" | "Expense">("all");
+  const [origin, setOrigin] = useState<"all" | "Student" | "Manual">("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [editing, setEditing] = useState<FundRecordDto | null>(null);
+  // Read-only: this is just which row's photo the person is currently viewing.
+  const [viewingPhoto, setViewingPhoto] = useState<FundRecordDto | null>(null);
   const [page, setPage] = useState(1);
 
   async function runSearch() {
@@ -38,6 +35,7 @@ function RecordsView() {
         dateFrom: from || undefined,
         dateTo: to || undefined,
         recordType: type === "all" ? undefined : type,
+        origin: origin === "all" ? undefined : origin,
       });
       const list = Array.isArray(result) ? result : result.data;
       setRecords(list);
@@ -52,26 +50,16 @@ function RecordsView() {
     const timeout = setTimeout(runSearch, 300);
     return () => clearTimeout(timeout);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, type, from, to]);
+  }, [q, type, origin, from, to]);
 
   useEffect(() => {
     setPage(1);
-  }, [q, type, from, to]);
-
-  const handleSave = async (id: number, payload: UpdateRecordPayload) => {
-    try {
-      await api.updateRecord(id, payload);
-      toast.success("Record updated");
-      setEditing(null);
-      runSearch();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Update failed");
-    }
-  };
+  }, [q, type, origin, from, to]);
 
   const clearFilters = () => {
     setQ("");
     setType("all");
+    setOrigin("all");
     setFrom("");
     setTo("");
   };
@@ -84,7 +72,8 @@ function RecordsView() {
         </div>
         <h1 className="display text-4xl md:text-5xl mt-3">Search records.</h1>
         <p className="text-muted-foreground mt-3 max-w-md text-sm leading-relaxed">
-          Find or edit any income or expense entry. Filterable by type, date range, and free-text.
+          Find any income or expense entry. Filterable by type, date range, and free-text. Records here are
+          read-only — corrections are made from the Students page.
         </p>
       </header>
 
@@ -119,15 +108,36 @@ function RecordsView() {
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <div className="flex items-center justify-between gap-4 flex-wrap text-xs text-muted-foreground">
         <span className="mono">
           {records.length} result{records.length === 1 ? "" : "s"}
         </span>
-        {(q || type !== "all" || from || to) && (
-          <button onClick={clearFilters} className="link-hover">
-            Clear filters
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/40 border border-border/70">
+            {(
+              [
+                { value: "all", label: "All entries" },
+                { value: "Student", label: "From student payments" },
+                { value: "Manual", label: "Recorded directly" },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.value}
+                onClick={() => setOrigin(o.value)}
+                className={`px-2.5 py-1 rounded-md text-[11px] transition ${
+                  origin === o.value ? "bg-foreground text-background" : "hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+          {(q || type !== "all" || origin !== "all" || from || to) && (
+            <button onClick={clearFilters} className="link-hover">
+              Clear filters
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="surface overflow-hidden">
@@ -138,165 +148,269 @@ function RecordsView() {
           </div>
         ) : (
           <div className="divide-y divide-border/70">
-            {paginate(records, page).map((t, i) => (
-              <div
-                key={t.recordId}
-                className="group grid grid-cols-[auto_1fr_auto_auto] items-center gap-4 px-5 py-4 hover:bg-muted/40 transition"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="mono text-[10px] text-muted-foreground w-6">{String((page - 1) * DEFAULT_PAGE_SIZE + i + 1).padStart(2, "0")}</span>
-                  <div
-                    className={`h-8 w-8 rounded-full grid place-items-center border ${
-                      t.recordType === "Income"
-                        ? "border-emerald/25 text-emerald bg-emerald/5"
-                        : "border-destructive/25 text-destructive bg-destructive/5"
-                    }`}
-                  >
-                    {t.recordType === "Income" ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
-                  </div>
-                </div>
-                <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{t.purpose || t.source || "—"}</div>
-                  <div className="text-[11px] text-muted-foreground mono mt-0.5 truncate">
-                    {t.recordDate.slice(0, 10)} · {t.recordType === "Income" ? t.source ?? "Income" : "Expense"}
-                    {t.paymentMethod ? ` · via ${t.paymentMethod}` : ""}
-                    {t.notes ? ` · ${t.notes}` : ""}
-                    {t.createdByName ? ` · by ${t.createdByName}` : ""}
-                  </div>
-                </div>
-                <div className={`mono font-medium ${t.recordType === "Income" ? "text-emerald" : "text-destructive"}`}>
-                  {t.recordType === "Income" ? "+" : "−"}
-                  {formatPHP(t.amount)}
-                </div>
-                {canEdit && (
-                  <div className="flex gap-0.5 opacity-0 group-hover:opacity-100 transition">
-                    <button
-                      onClick={() => setEditing(t)}
-                      className="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
-                      title="Edit"
+            {paginate(records, page).map((t, i) => {
+              // Two independent kinds of photo a row can have: a single
+              // reference photo from a student payment/refund, or one-to-many
+              // receipt photos attached directly to a manually-recorded
+              // expense. A row is only clickable if it actually has one.
+              const hasReference = Boolean(t.paymentId && t.reference);
+              const hasAttachments = t.attachmentCount > 0;
+              const clickable = hasReference || hasAttachments;
+              return (
+                <div
+                  key={t.recordId}
+                  onClick={clickable ? () => setViewingPhoto(t) : undefined}
+                  className={`grid grid-cols-[auto_1fr_auto] items-center gap-4 px-5 py-4 transition ${
+                    clickable ? "cursor-pointer hover:bg-muted/40" : ""
+                  }`}
+                  title={hasReference ? "View reference photo" : hasAttachments ? "View attached photos" : undefined}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="mono text-[10px] text-muted-foreground w-6">{String((page - 1) * DEFAULT_PAGE_SIZE + i + 1).padStart(2, "0")}</span>
+                    <div
+                      className={`h-8 w-8 rounded-full grid place-items-center border ${
+                        t.recordType === "Income"
+                          ? "border-emerald/25 text-emerald bg-emerald/5"
+                          : "border-destructive/25 text-destructive bg-destructive/5"
+                      }`}
                     >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
+                      {t.recordType === "Income" ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium truncate flex items-center gap-2">
+                      <span className="truncate">{t.purpose || t.source || "—"}</span>
+                      {t.isStudentPayment && (
+                        <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-emerald/10 text-emerald shrink-0">
+                          Student
+                        </span>
+                      )}
+                      {hasAttachments && (
+                        <span className="inline-flex items-center gap-1 mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground shrink-0">
+                          <Paperclip className="h-2.5 w-2.5" /> {t.attachmentCount}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mono mt-0.5 truncate">
+                      {t.recordDate.slice(0, 10)} · {t.recordType === "Income" ? t.source ?? "Income" : "Expense"}
+                      {t.paymentMethod ? ` · via ${t.paymentMethod}` : ""}
+                      {t.reference ? ` · ${t.reference}` : ""}
+                      {t.notes ? ` · ${t.notes}` : ""}
+                      {t.createdByName ? ` · by ${t.createdByName}` : ""}
+                    </div>
+                  </div>
+                  <div className={`mono font-medium ${t.recordType === "Income" ? "text-emerald" : "text-destructive"}`}>
+                    {t.recordType === "Income" ? "+" : "−"}
+                    {formatPHP(t.amount)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
       {!loading && records.length > 0 && <Pagination page={page} totalItems={records.length} onPageChange={setPage} />}
 
-      {editing && (
-        <EditModal record={editing} onClose={() => setEditing(null)} onSave={(payload) => handleSave(editing.recordId, payload)} />
-      )}
+      {viewingPhoto && <PhotoModal record={viewingPhoto} onClose={() => setViewingPhoto(null)} />}
     </div>
   );
 }
 
-function EditModal({
-  record,
-  onClose,
-  onSave,
-}: {
-  record: FundRecordDto;
-  onClose: () => void;
-  onSave: (payload: UpdateRecordPayload) => void;
-}) {
-  const [date, setDate] = useState(record.recordDate.slice(0, 10));
-  const [amount, setAmount] = useState(String(record.amount));
-  const [source, setSource] = useState(record.source ?? "");
-  const [purpose, setPurpose] = useState(record.purpose ?? "");
-  const [notes, setNotes] = useState(record.notes ?? "");
-  const [paymentMethod, setPaymentMethod] = useState(record.paymentMethod ?? "");
-  const [bankName, setBankName] = useState("");
-  const [bankRef, setBankRef] = useState("");
-
-  const save = (e: React.FormEvent) => {
-    e.preventDefault();
-    const amt = parseFloat(amount);
-    if (!date || !amt || amt <= 0) return toast.error("Please complete all required fields.");
-    if (paymentMethod === "Bank Transfer" && !bankName.trim()) return toast.error("Specify the bank");
-    const combinedNotes =
-      paymentMethod === "Bank Transfer" && (bankName.trim() || bankRef.trim())
-        ? [notes.trim(), `Bank transfer: ${bankName.trim()}${bankRef.trim() ? ` — ${bankRef.trim()}` : ""}`]
-            .filter(Boolean)
-            .join(" — ")
-        : notes.trim();
-    onSave({
-      recordDate: date,
-      amount: amt,
-      source: record.recordType === "Income" ? source.trim() : undefined,
-      purpose: purpose.trim() || undefined,
-      notes: combinedNotes || undefined,
-      paymentMethod: paymentMethod || undefined,
-    });
-  };
+/** Read-only photo viewer - Records page has no edit capability. Shows either
+ * the single student-payment receipt, or the expense's attached photo gallery. */
+function PhotoModal({ record, onClose }: { record: FundRecordDto; onClose: () => void }) {
+  const hasReference = Boolean(record.paymentId && record.reference);
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-foreground/30 backdrop-blur-sm" onClick={onClose}>
-      <form onSubmit={save} onClick={(e) => e.stopPropagation()} className="surface-lift max-w-lg w-full p-8 space-y-6">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="eyebrow">Edit entry</div>
-            <h3 className="display text-2xl mt-1 capitalize">Update {record.recordType.toLowerCase()}</h3>
+      <div onClick={(e) => e.stopPropagation()} className="surface-lift max-w-lg w-full p-8 space-y-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <div className="eyebrow">{hasReference ? "Reference photo" : "Attached photos"}</div>
+            <h3 className="display text-2xl mt-1 truncate">{record.purpose || record.source || "Record"}</h3>
+            <p className="text-xs text-muted-foreground mt-1 truncate">
+              {record.recordDate.slice(0, 10)}
+              {record.paymentMethod ? ` · ${record.paymentMethod}` : ""}
+              {record.reference ? ` · ${record.reference}` : ""}
+            </p>
           </div>
           <button type="button" onClick={onClose} className="p-2 -m-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition">
             <X className="h-4 w-4" />
           </button>
         </div>
+
         <div className="hairline-b" />
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-            <DatePicker label="Date" value={date} onChange={setDate} />
-            <FloatField label="Amount" value={amount}>
-              <input type="number" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
-            </FloatField>
-          </div>
-          {record.recordType === "Income" && (
-            <FloatField label="Source" value={source}>
-              <input value={source} onChange={(e) => setSource(e.target.value)} />
-            </FloatField>
-          )}
-          <FloatField label="Purpose" value={purpose}>
-            <input value={purpose} onChange={(e) => setPurpose(e.target.value)} maxLength={120} />
-          </FloatField>
-          <SelectPicker
-            label="Payment method (optional)"
-            value={paymentMethod}
-            placeholder="Not specified"
-            options={[{ value: "", label: "Not specified" }, ...PAYMENT_METHODS.map((m) => ({ value: m, label: m }))]}
-            onChange={setPaymentMethod}
-          />
-          {paymentMethod === "Bank Transfer" && (
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2">
-              <FloatField label="Bank name / type" value={bankName}>
-                <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
-              </FloatField>
-              <ReferenceNumberField label="Reference number (optional)" value={bankRef} onChange={setBankRef} />
-            </div>
-          )}
-          <FloatField label="Notes" value={notes}>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
-          </FloatField>
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className="btn btn-ghost">
-            Cancel
-          </button>
-          <button type="submit" className="btn btn-primary">
-            Save changes <ArrowRight className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </form>
+
+        {hasReference ? <ReceiptPhotoView paymentId={record.paymentId!} /> : <AttachmentGalleryView recordId={record.recordId} />}
+      </div>
     </div>
   );
 }
 
-function FloatField({ label, value, children }: { label: string; value: string; children: React.ReactNode }) {
+function ReceiptPhotoView({ paymentId }: { paymentId: number }) {
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setState("loading");
+    setImgUrl(null);
+    (async () => {
+      try {
+        const blob = await api.fetchReceiptBlob(paymentId);
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setImgUrl(objectUrl);
+          setState("ready");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        // A 404 just means no photo was ever attached - not a real failure.
+        setState(err instanceof ApiError && err.status === 404 ? "missing" : "error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [paymentId]);
+
   return (
-    <label className={"field" + (value ? " is-filled" : "")}>
-      {children}
-      <span className="field-label">{label}</span>
-    </label>
+    <div className="bg-black/30 rounded-xl min-h-[16rem] grid place-items-center p-4">
+      {state === "loading" ? (
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      ) : state === "missing" ? (
+        <div className="text-center py-10 px-4">
+          <ImageOff className="h-8 w-8 text-muted-foreground/60 mx-auto mb-3" />
+          <div className="text-sm text-muted-foreground">No photo available</div>
+          <div className="text-xs text-muted-foreground/70 mt-1 max-w-xs">
+            This payment was recorded without an attached reference photo.
+          </div>
+        </div>
+      ) : state === "error" ? (
+        <div className="text-center py-10 px-4">
+          <ImageOff className="h-8 w-8 text-destructive/60 mx-auto mb-3" />
+          <div className="text-sm text-muted-foreground">Couldn't load the receipt photo.</div>
+          <div className="text-xs text-muted-foreground/70 mt-1">Please try again in a moment.</div>
+        </div>
+      ) : imgUrl ? (
+        <img src={imgUrl} alt="Receipt" className="max-h-[60vh] w-full object-contain rounded-lg" />
+      ) : null}
+    </div>
+  );
+}
+
+/** Multi-photo gallery for an expense's attached receipts, with prev/next paging. */
+function AttachmentGalleryView({ recordId }: { recordId: number }) {
+  const [attachments, setAttachments] = useState<FundRecordAttachmentDto[] | null>(null);
+  const [index, setIndex] = useState(0);
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [imgState, setImgState] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    api
+      .getAttachments(recordId)
+      .then(setAttachments)
+      .catch(() => setAttachments([]));
+  }, [recordId]);
+
+  const current = attachments?.[index];
+
+  useEffect(() => {
+    if (!current) return;
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    setImgState("loading");
+    setImgUrl(null);
+    (async () => {
+      try {
+        const blob = await api.fetchAttachmentBlob(current.attachmentId);
+        objectUrl = URL.createObjectURL(blob);
+        if (!cancelled) {
+          setImgUrl(objectUrl);
+          setImgState("ready");
+        }
+      } catch {
+        if (!cancelled) setImgState("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [current]);
+
+  if (attachments === null) {
+    return (
+      <div className="bg-black/30 rounded-xl min-h-[16rem] grid place-items-center p-4">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (attachments.length === 0) {
+    return (
+      <div className="bg-black/30 rounded-xl min-h-[16rem] grid place-items-center p-4">
+        <div className="text-center py-10 px-4">
+          <ImageOff className="h-8 w-8 text-muted-foreground/60 mx-auto mb-3" />
+          <div className="text-sm text-muted-foreground">No photos attached</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="relative bg-black/30 rounded-xl min-h-[16rem] grid place-items-center p-4">
+        {imgState === "loading" ? (
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        ) : imgState === "error" ? (
+          <div className="text-center py-10 px-4">
+            <ImageOff className="h-8 w-8 text-destructive/60 mx-auto mb-3" />
+            <div className="text-sm text-muted-foreground">Couldn't load this photo.</div>
+          </div>
+        ) : imgUrl ? (
+          <img src={imgUrl} alt={current?.fileName ?? "Attachment"} className="max-h-[55vh] w-full object-contain rounded-lg" />
+        ) : null}
+
+        {attachments.length > 1 && (
+          <>
+            <button
+              type="button"
+              onClick={() => setIndex((i) => (i - 1 + attachments.length) % attachments.length)}
+              className="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
+              aria-label="Previous photo"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIndex((i) => (i + 1) % attachments.length)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-black/50 text-white hover:bg-black/70 transition"
+              aria-label="Next photo"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </>
+        )}
+      </div>
+
+      {attachments.length > 1 && (
+        <div className="flex items-center justify-center gap-1.5">
+          {attachments.map((a, i) => (
+            <button
+              key={a.attachmentId}
+              onClick={() => setIndex(i)}
+              className={`h-1.5 rounded-full transition-all ${i === index ? "w-4 bg-emerald" : "w-1.5 bg-muted-foreground/40"}`}
+              aria-label={`Photo ${i + 1}`}
+            />
+          ))}
+        </div>
+      )}
+      <div className="text-center text-[11px] mono text-muted-foreground">
+        {index + 1} of {attachments.length}
+      </div>
+    </div>
   );
 }

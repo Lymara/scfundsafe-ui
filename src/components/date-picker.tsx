@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -7,6 +8,10 @@ const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December",
 ];
+
+const PANEL_WIDTH = 208; // matches the w-52 panel below
+const VIEWPORT_MARGIN = 8;
+const GAP = 8;
 
 function parseISO(v: string): Date | null {
   if (!v) return null;
@@ -58,6 +63,17 @@ export function DatePicker({
   const selected = parseISO(value);
   const [viewDate, setViewDate] = useState(() => selected ?? new Date());
   const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  // The panel is portaled to <body> and positioned with `fixed` coordinates
+  // measured off the trigger, instead of living inside the filter bar's own
+  // DOM subtree. That subtree has `backdrop-filter` on it (the "surface"
+  // background blur), which - per spec - creates its own stacking context.
+  // A z-index inside a stacking context can never outrank content *outside*
+  // it, no matter how high, so the calendar was getting painted underneath
+  // later sibling cards. Portaling it to <body> sidesteps that trap
+  // entirely.
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     if (selected) setViewDate(selected);
@@ -66,11 +82,42 @@ export function DatePicker({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      if (panelRef.current?.contains(target)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // Position the panel: below the trigger by default, but flipped ABOVE it
+  // instead whenever there isn't enough room below (e.g. a Date field near
+  // the bottom of a scrolling modal). Without this, a portaled panel can
+  // run straight off the bottom of the screen with no way to scroll down
+  // and reach it, since it no longer lives inside the modal's own
+  // scrollable box.
+  useLayoutEffect(() => {
+    if (!open || !containerRef.current) return;
+    const reposition = () => {
+      const rect = containerRef.current!.getBoundingClientRect();
+      const panelHeight = panelRef.current?.offsetHeight ?? 300;
+
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const fitsBelow = spaceBelow >= panelHeight + GAP;
+      const top = fitsBelow ? rect.bottom + GAP : Math.max(VIEWPORT_MARGIN, rect.top - panelHeight - GAP);
+
+      const left = Math.min(rect.left, window.innerWidth - PANEL_WIDTH - VIEWPORT_MARGIN);
+      setCoords({ top, left: Math.max(VIEWPORT_MARGIN, left) });
+    };
+    reposition();
+    window.addEventListener("resize", reposition);
+    window.addEventListener("scroll", reposition, true);
+    return () => {
+      window.removeEventListener("resize", reposition);
+      window.removeEventListener("scroll", reposition, true);
+    };
+  }, [open, viewDate]);
 
   const year = viewDate.getFullYear();
   const month = viewDate.getMonth();
@@ -101,91 +148,97 @@ export function DatePicker({
     ? selected.toLocaleDateString("en-PH", { month: dense ? "short" : "2-digit", day: "2-digit", year: "numeric" })
     : "";
 
-  const panel = open && (
-    <div className="absolute z-30 mt-2 w-52 surface-lift p-2.5 left-0">
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="text-xs font-semibold">
-          {MONTH_NAMES[month]} {year}
-        </div>
-        <div className="flex items-center gap-0.5">
-          <button
-            type="button"
-            onClick={() => setViewDate(new Date(year, month - 1, 1))}
-            className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
-            aria-label="Previous month"
-          >
-            <ArrowUp className="h-3 w-3" />
-          </button>
-          <button
-            type="button"
-            onClick={() => setViewDate(new Date(year, month + 1, 1))}
-            className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
-            aria-label="Next month"
-          >
-            <ArrowDown className="h-3 w-3" />
-          </button>
-        </div>
-      </div>
-      <div className="grid grid-cols-7 gap-0.5 mb-0.5">
-        {WEEKDAYS.map((w) => (
-          <div key={w} className="text-center text-[9px] text-muted-foreground mono">
-            {w}
+  const panel = open && coords &&
+    createPortal(
+      <div
+        ref={panelRef}
+        className="fixed z-[100] w-52 surface-lift p-2.5"
+        style={{ top: coords.top, left: coords.left }}
+      >
+        <div className="flex items-center justify-between mb-1.5">
+          <div className="text-xs font-semibold">
+            {MONTH_NAMES[month]} {year}
           </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-7 gap-0.5">
-        {grid.map((c, i) => {
-          const isSelected = !!selected && sameDay(c.date, selected);
-          const isToday = sameDay(c.date, today);
-          const isPast = disablePast && c.date.getTime() < todayMidnight.getTime();
-          return (
+          <div className="flex items-center gap-0.5">
             <button
-              key={i}
               type="button"
-              disabled={isPast}
-              onClick={() => {
-                onChange(toISO(c.date));
-                setOpen(false);
-              }}
-              className={cn(
-                "h-6 w-6 rounded-md text-[10px] transition mono",
-                !c.inMonth && !isPast && "text-muted-foreground/30 hover:bg-muted/40",
-                c.inMonth && !isSelected && !isPast && "text-foreground hover:bg-muted",
-                isSelected && !isPast && "bg-emerald text-[oklch(0.14_0.02_165)] font-semibold hover:bg-emerald",
-                isToday && !isSelected && !isPast && "ring-1 ring-emerald/50",
-                isPast && "text-muted-foreground/25 cursor-not-allowed pointer-events-none",
-              )}
+              onClick={() => setViewDate(new Date(year, month - 1, 1))}
+              className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
+              aria-label="Previous month"
             >
-              {c.date.getDate()}
+              <ArrowUp className="h-3 w-3" />
             </button>
-          );
-        })}
-      </div>
-      <div className="flex items-center justify-between mt-1.5 pt-1.5 hairline-t text-[10px]">
-        <button
-          type="button"
-          onClick={() => {
-            onChange("");
-            setOpen(false);
-          }}
-          className="text-muted-foreground hover:text-foreground transition"
-        >
-          Clear
-        </button>
-        <button
-          type="button"
-          onClick={() => {
-            onChange(toISO(today));
-            setViewDate(today);
-            setOpen(false);
-          }}
-          className="text-emerald hover:underline"
-        >
-          Today
-        </button>
-      </div>
-    </div>
-  );
+            <button
+              type="button"
+              onClick={() => setViewDate(new Date(year, month + 1, 1))}
+              className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
+              aria-label="Next month"
+            >
+              <ArrowDown className="h-3 w-3" />
+            </button>
+          </div>
+        </div>
+        <div className="grid grid-cols-7 gap-0.5 mb-0.5">
+          {WEEKDAYS.map((w) => (
+            <div key={w} className="text-center text-[9px] text-muted-foreground mono">
+              {w}
+            </div>
+          ))}
+        </div>
+        <div className="grid grid-cols-7 gap-0.5">
+          {grid.map((c, i) => {
+            const isSelected = !!selected && sameDay(c.date, selected);
+            const isToday = sameDay(c.date, today);
+            const isPast = disablePast && c.date.getTime() < todayMidnight.getTime();
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={isPast}
+                onClick={() => {
+                  onChange(toISO(c.date));
+                  setOpen(false);
+                }}
+                className={cn(
+                  "h-6 w-6 rounded-md text-[10px] transition mono",
+                  !c.inMonth && !isPast && "text-muted-foreground/30 hover:bg-muted/40",
+                  c.inMonth && !isSelected && !isPast && "text-foreground hover:bg-muted",
+                  isSelected && !isPast && "bg-emerald text-[oklch(0.14_0.02_165)] font-semibold hover:bg-emerald",
+                  isToday && !isSelected && !isPast && "ring-1 ring-emerald/50",
+                  isPast && "text-muted-foreground/25 cursor-not-allowed pointer-events-none",
+                )}
+              >
+                {c.date.getDate()}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center justify-between mt-1.5 pt-1.5 hairline-t text-[10px]">
+          <button
+            type="button"
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+            className="text-muted-foreground hover:text-foreground transition"
+          >
+            Clear
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              onChange(toISO(today));
+              setViewDate(today);
+              setOpen(false);
+            }}
+            className="text-emerald hover:underline"
+          >
+            Today
+          </button>
+        </div>
+      </div>,
+      document.body,
+    );
 
   if (dense) {
     return (

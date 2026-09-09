@@ -37,6 +37,25 @@ export interface FundRecordDto {
   createdAt: string;
   updatedByName?: string | null;
   updatedAt?: string | null;
+  /** True when posted automatically from a Students page fee payment/refund, false when typed directly on Record Income/Expense. */
+  isStudentPayment: boolean;
+  /** The linked student-payment id (only set when isStudentPayment is true) - used to view/change its receipt photo. */
+  paymentId?: number | null;
+  /** The reference/transaction number captured on that payment, if any. */
+  reference?: string | null;
+  /** True when that payment has a receipt photo attached. */
+  hasReceipt: boolean;
+  /** How many photos/files are attached to this record (Expense records only). */
+  attachmentCount: number;
+}
+
+export interface FundRecordAttachmentDto {
+  attachmentId: number;
+  recordId: number;
+  contentType: string;
+  fileName?: string | null;
+  uploadedByName?: string | null;
+  uploadedAt: string;
 }
 
 export interface RecordIncomePayload {
@@ -56,6 +75,7 @@ export interface RecordExpensePayload {
   paymentMethod?: string;
 }
 
+/** UC-07 Update Entry - only valid for manually-entered Income/Expense records (not anything linked to a student fee payment/refund; see api.updatePayment for those). */
 export interface UpdateRecordPayload {
   recordDate: string;
   amount: number;
@@ -77,6 +97,8 @@ export interface SearchRecordsParams {
   dateFrom?: string;
   dateTo?: string;
   recordType?: "Income" | "Expense" | "";
+  /** "Student" = posted from the Students page (fee payment/refund), "Manual" = typed on Record Income/Expense. */
+  origin?: "Student" | "Manual" | "";
 }
 
 export interface ReportParams {
@@ -102,6 +124,7 @@ export interface UserListItemDto {
   fullName: string;
   email: string;
   role: Role;
+  isActive: boolean;
 }
 
 export interface CreateUserPayload {
@@ -187,6 +210,13 @@ export interface RecordRefundPayload {
   feeId: number;
   amount: number;
   refundDate: string;
+  paymentMethod: PaymentMethod;
+  reference?: string;
+}
+
+export interface UpdateStudentPaymentPayload {
+  amount: number;
+  paymentDate: string;
   paymentMethod: PaymentMethod;
   reference?: string;
 }
@@ -385,6 +415,56 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  // UC-07 Update Entry - manually-entered Expense records only (Income and
+  // student-linked payments/refunds are rejected server-side; the latter
+  // must be corrected from the Students page instead).
+  updateRecord: (recordId: number, payload: UpdateRecordPayload) =>
+    request<{ message: string; data: FundRecordDto }>(`/records/${recordId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+  // Photo/file attachments for manually-entered records (Income or Expense)
+  uploadAttachments: async (recordId: number, files: File[]) => {
+    const token = getToken();
+    const form = new FormData();
+    files.forEach((f) => form.append("files", f));
+    const res = await fetch(`${API_BASE}/records/${recordId}/attachments`, {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      body: form,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.message || "Failed to attach files.", res.status);
+    }
+    return res.json() as Promise<{ message: string }>;
+  },
+
+  getAttachments: (recordId: number) => request<FundRecordAttachmentDto[]>(`/records/${recordId}/attachments`),
+
+  fetchAttachmentBlob: async (attachmentId: number): Promise<Blob> => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/records/attachments/${attachmentId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!res.ok) throw new ApiError("Couldn't load the photo.", res.status);
+    return res.blob();
+  },
+
+  deleteAttachment: async (attachmentId: number) => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/records/attachments/${attachmentId}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.message || "Failed to remove the photo.", res.status);
+    }
+    return res.json() as Promise<{ message: string }>;
+  },
+
   // UC-04 View Balance
   getBalance: () => request<BalanceDto>("/balance"),
 
@@ -397,12 +477,18 @@ export const api = {
       `/records/search${toQuery(params)}`,
     ),
 
-  // UC-07 Update Entry
-  updateRecord: (id: number, payload: UpdateRecordPayload) =>
-    request<{ message: string; data: FundRecordDto }>(`/records/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
+  // Read-only: fetches the receipt photo attached to a record's linked
+  // student payment/refund, if any. No matching upload/delete here - the
+  // Records page cannot edit anything; receipts are only ever attached
+  // or changed from the Students page.
+  fetchRecordReceiptBlob: async (recordId: number): Promise<Blob> => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/records/${recordId}/receipt`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!res.ok) throw new ApiError("Couldn't load the receipt photo.", res.status);
+    return res.blob();
+  },
 
   // UC-06 Generate Reports
   getReport: (params: ReportParams) =>
@@ -426,6 +512,12 @@ export const api = {
 
   deleteUser: (id: string) =>
     request<{ message: string }>(`/admin/users/${id}`, { method: "DELETE" }),
+
+  deactivateUser: (id: string) =>
+    request<{ message: string }>(`/admin/users/${id}/deactivate`, { method: "PATCH" }),
+
+  reactivateUser: (id: string) =>
+    request<{ message: string }>(`/admin/users/${id}/reactivate`, { method: "PATCH" }),
 
   resetUserPassword: (id: string, newPassword: string) =>
     request<{ message: string }>(`/admin/users/${id}/reset-password`, {
@@ -494,10 +586,19 @@ export const api = {
       `/students/payments${toQuery(params as unknown as Record<string, string | undefined>)}`,
     ),
 
-  uploadReceipt: async (paymentId: number, file: File) => {
+  // Corrects an existing payment/refund's amount/date/method/reference -
+  // keeps the roster total and the linked Fees & Sources entry in sync.
+  updatePayment: (paymentId: number, payload: UpdateStudentPaymentPayload) =>
+    request<{ message: string; data: StudentFeePaymentDto }>(`/students/payments/${paymentId}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
+
+    uploadReceipt: async (paymentId: number, file: File, reference?: string) => {
     const token = getToken();
     const form = new FormData();
     form.append("file", file);
+    if (reference) form.append("reference", reference);
     const res = await fetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -517,6 +618,19 @@ export const api = {
     });
     if (!res.ok) throw new ApiError("Couldn't load the receipt photo.", res.status);
     return res.blob();
+  },
+
+  deleteReceipt: async (paymentId: number) => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(body.message || "Failed to remove the receipt photo.", res.status);
+    }
+    return res.json() as Promise<{ message: string }>;
   },
 
   getStudentFees: (studentId: number) =>

@@ -12,23 +12,46 @@ import {
   UserRoundPlus,
   UserRoundX,
   RotateCcw,
+  UserRoundMinus,
+  UserRoundCheck,
   X,
   Search,
   ShieldCheck,
   CircleUserRound,
   BadgeCheck,
   AtSign,
-  Cog,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
+import { PrintTable } from "@/components/print-table";
 import { SelectPicker } from "@/components/select-picker";
+import { DatePicker } from "@/components/date-picker";
+import bitsLogo from "@/assets/bits-logo.png";
 
 type Tab = "account" | "members" | "activity";
 
 function roleLabel(role: string) {
   return role === "ClassRepresentative" ? "Class Representative" : role;
+}
+
+/** Every distinct `action` string the API logs, grouped under the page it
+ * belongs to. Order matters - more specific phrases (e.g. "fee payment")
+ * are checked before the generic ones ("fee") they'd otherwise collide
+ * with. Falls back to "Members" since everything left over is an
+ * admin-on-account action (create/remove/deactivate/reset password). */
+const ACTIVITY_MODULES = ["All", "Account", "Members", "Students", "Payments", "Fees", "Records"] as const;
+type ActivityModule = (typeof ACTIVITY_MODULES)[number];
+
+function activityModule(action: string): Exclude<ActivityModule, "All"> {
+  const a = action.toLowerCase();
+  if (a.includes("signed in") || a.includes("own password")) return "Account";
+  if (a.includes("fee payment") || a.includes("refund") || a.includes("receipt")) return "Payments";
+  if (a.includes("student")) return "Students";
+  if (a.includes("fee")) return "Fees";
+  if (a.includes("income") || a.includes("expense") || a.includes("record")) return "Records";
+  return "Members";
 }
 
 export default function SettingsPage() {
@@ -46,7 +69,7 @@ export default function SettingsPage() {
   return (
     <AppLayout>
       <div className="space-y-10 pb-16">
-        <header className="flex items-start justify-between gap-6 flex-wrap">
+        <header className="flex items-start justify-between gap-6 flex-wrap print:hidden">
           <div>
             <div className="eyebrow flex items-center gap-2">
               <SlidersHorizontal className="h-3 w-3 text-amber" />
@@ -59,16 +82,10 @@ export default function SettingsPage() {
                 : "Manage your personal credentials for IT FundSafe."}
             </p>
           </div>
-          <div className="hidden md:flex items-center gap-2 surface px-3.5 py-2">
-            <Cog className="h-3.5 w-3.5 text-emerald" />
-            <span className="mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              v1.0 · secure session
-            </span>
-          </div>
         </header>
 
         {visible.length > 1 && (
-          <nav className="grid gap-2 sm:grid-cols-3">
+          <nav className="grid gap-2 sm:grid-cols-3 print:hidden">
             {visible.map((t) => {
               const Icon = t.icon;
               const active = tab === t.id;
@@ -299,7 +316,7 @@ function MembersSection() {
           <span>Member</span>
           <span>Role</span>
           <span>Email</span>
-          <span className="w-24 text-right">Actions</span>
+          <span className="w-32 text-right">Actions</span>
         </div>
 
         {loading ? (
@@ -319,7 +336,10 @@ function MembersSection() {
               return (
                 <div
                   key={u.userId}
-                  className="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-4 px-5 py-4 hover:bg-muted/40 transition group"
+                  className={cn(
+                    "grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-4 px-5 py-4 hover:bg-muted/40 transition group",
+                    !u.isActive && "opacity-50",
+                  )}
                 >
                   <span className="mono text-[10px] text-muted-foreground w-6">{String(i + 1).padStart(2, "0")}</span>
                   <div className="min-w-0 flex items-center gap-3">
@@ -332,6 +352,11 @@ function MembersSection() {
                         {self && (
                           <span className="mono text-[9px] text-emerald border border-emerald/30 rounded px-1.5 py-0.5">
                             YOU
+                          </span>
+                        )}
+                        {!u.isActive && (
+                          <span className="mono text-[9px] text-muted-foreground border border-border rounded px-1.5 py-0.5">
+                            DEACTIVATED
                           </span>
                         )}
                       </div>
@@ -348,7 +373,7 @@ function MembersSection() {
                     </span>
                   </div>
                   <div className="text-xs mono text-muted-foreground truncate">{u.email}</div>
-                  <div className="flex gap-1 justify-end w-24">
+                  <div className="flex gap-1 justify-end w-32">
                     <button
                       onClick={() => setResetTarget(u)}
                       className="p-2 rounded-md hover:bg-amber/10 text-muted-foreground hover:text-amber transition"
@@ -359,7 +384,30 @@ function MembersSection() {
                     <button
                       disabled={self}
                       onClick={async () => {
-                        if (!confirm(`Remove account for ${u.fullName}?`)) return;
+                        const action = u.isActive ? "Deactivate" : "Reactivate";
+                        if (!confirm(`${action} account for ${u.fullName}?`)) return;
+                        try {
+                          if (u.isActive) {
+                            await api.deactivateUser(u.userId);
+                            toast.success("Account deactivated");
+                          } else {
+                            await api.reactivateUser(u.userId);
+                            toast.success("Account reactivated");
+                          }
+                          load();
+                        } catch (err) {
+                          toast.error(err instanceof ApiError ? err.message : `Failed to ${action.toLowerCase()} account`);
+                        }
+                      }}
+                      className="p-2 rounded-md hover:bg-amber/10 text-muted-foreground hover:text-amber transition disabled:opacity-30 disabled:pointer-events-none"
+                      title={self ? "You cannot deactivate your own account" : u.isActive ? "Deactivate" : "Reactivate"}
+                    >
+                      {u.isActive ? <UserRoundMinus className="h-3.5 w-3.5" /> : <UserRoundCheck className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      disabled={self}
+                      onClick={async () => {
+                        if (!confirm(`Permanently remove account for ${u.fullName}? This cannot be undone.`)) return;
                         try {
                           await api.deleteUser(u.userId);
                           toast.success("Account removed");
@@ -369,7 +417,7 @@ function MembersSection() {
                         }
                       }}
                       className="p-2 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition disabled:opacity-30 disabled:pointer-events-none"
-                      title={self ? "You cannot remove your own account" : "Remove"}
+                      title={self ? "You cannot remove your own account" : "Permanently remove"}
                     >
                       <UserRoundX className="h-3.5 w-3.5" />
                     </button>
@@ -578,6 +626,9 @@ function ActivitySection() {
   const [logs, setLogs] = useState<ActivityLogDto[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
+  const [module, setModule] = useState<ActivityModule>("All");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
 
   useEffect(() => {
@@ -596,20 +647,72 @@ function ActivitySection() {
 
   const results = useMemo(() => {
     if (!logs) return [];
-    if (!q) return logs;
-    const s = q.toLowerCase();
-    return logs.filter(
-      (l) => l.action.toLowerCase().includes(s) || l.userName.toLowerCase().includes(s) || (l.detail?.toLowerCase().includes(s) ?? false),
-    );
-  }, [logs, q]);
+    const s = q.trim().toLowerCase();
+    const fromDt = from ? new Date(`${from}T00:00:00`) : null;
+    const toDt = to ? new Date(`${to}T23:59:59.999`) : null;
+
+    return logs.filter((l) => {
+      if (module !== "All" && activityModule(l.action) !== module) return false;
+      if (fromDt || toDt) {
+        const created = new Date(l.createdAt);
+        if (fromDt && created < fromDt) return false;
+        if (toDt && created > toDt) return false;
+      }
+      if (s) {
+        const matches =
+          l.action.toLowerCase().includes(s) || l.userName.toLowerCase().includes(s) || (l.detail?.toLowerCase().includes(s) ?? false);
+        if (!matches) return false;
+      }
+      return true;
+    });
+  }, [logs, q, module, from, to]);
 
   useEffect(() => {
     setPage(1);
-  }, [q]);
+  }, [q, module, from, to]);
+
+  const hasFilters = !!q || module !== "All" || !!from || !!to;
+  const clearFilters = () => {
+    setQ("");
+    setModule("All");
+    setFrom("");
+    setTo("");
+  };
+
+  const dateRangeLabel = (() => {
+    if (!from && !to) return "";
+    const fmt = (v: string) => new Date(`${v}T00:00:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" });
+    if (from && to) return `${fmt(from)} – ${fmt(to)}`;
+    if (from) return `Since ${fmt(from)}`;
+    return `Through ${fmt(to)}`;
+  })();
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      {/* Print-only letterhead - mirrors the Reports page so a printed audit
+          trail looks like an official document, not a screenshot. Reflects
+          whatever search/module/date filters are active on screen, so the
+          printout always matches what was on screen when Print was pressed. */}
+      <div className="hidden print:block space-y-1 pb-4 mb-2 border-b-2 border-black/80">
+        <div className="flex items-center gap-3">
+          <img src={bitsLogo} alt="BSIT Department" className="h-10 w-10 object-contain" />
+          <div>
+            <div className="text-lg font-bold leading-none">IT FundSafe</div>
+            <div className="text-[10px] text-black/60 mt-0.5">BSIT Department Council · Audit Trail</div>
+          </div>
+        </div>
+        <div className="flex items-baseline justify-between pt-2 text-[11px] text-black/70">
+          <span>
+            {results.length} entr{results.length === 1 ? "y" : "ies"}
+            {module !== "All" ? ` · ${module}` : ""}
+            {dateRangeLabel ? ` · ${dateRangeLabel}` : ""}
+            {q ? ` · matching "${q}"` : ""}
+          </span>
+          <span>Generated {new Date().toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Manila" })}</span>
+        </div>
+      </div>
+
+      <div className="flex items-start justify-between gap-4 flex-wrap print:hidden">
         <div>
           <div className="flex items-center gap-2 text-sm font-semibold">
             <ScrollText className="h-4 w-4 text-emerald" /> Audit trail
@@ -618,13 +721,26 @@ function ActivitySection() {
             A tamper-evident record of every action taken in IT FundSafe.
           </p>
         </div>
-        <div className="mono text-[10px] uppercase tracking-widest text-muted-foreground surface px-3 py-2">
-          {logs?.length ?? 0} total entries
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="mono text-[10px] uppercase tracking-widest text-muted-foreground surface px-3 py-2">
+            {logs?.length ?? 0} total entries
+          </div>
+          <button
+            onClick={() => window.print()}
+            disabled={loading || results.length === 0}
+            title={hasFilters ? `Print ${results.length} filtered entr${results.length === 1 ? "y" : "ies"}` : "Print the audit trail"}
+            className="btn btn-primary disabled:opacity-40 disabled:pointer-events-none"
+          >
+            <Printer className="h-3.5 w-3.5" /> Print
+          </button>
         </div>
       </div>
 
-      <div className="surface p-2 flex items-center gap-1">
-        <div className="relative flex-1">
+      {/* Filter bar: free-text search, module, and date range all narrow
+          `results` together - and whatever is left is exactly what Print
+          sends to the printer below. */}
+      <div className="surface p-2 flex flex-wrap items-center gap-1 print:hidden">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={q}
@@ -633,10 +749,40 @@ function ActivitySection() {
             className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
         </div>
-        <span className="mono text-[10px] text-muted-foreground pr-3">{results.length} shown</span>
+        <div className="flex items-center gap-1 pl-2 border-l border-border/70">
+          <DatePicker value={from} onChange={setFrom} dense placeholder="From" />
+          <span className="text-muted-foreground text-xs">→</span>
+          <DatePicker value={to} onChange={setTo} dense placeholder="To" />
+        </div>
       </div>
 
-      <div className="surface overflow-hidden">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/40 border border-border/70 flex-wrap print:hidden">
+          {ACTIVITY_MODULES.map((m) => (
+            <button
+              key={m}
+              onClick={() => setModule(m)}
+              className={cn(
+                "px-2.5 py-1 rounded-md text-[11px] transition",
+                module === m ? "bg-foreground text-background" : "text-muted-foreground hover:text-foreground hover:bg-muted",
+              )}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-3 print:hidden">
+          {hasFilters && (
+            <button onClick={clearFilters} className="link-hover text-xs">
+              Clear filters
+            </button>
+          )}
+          <span className="mono text-[10px] text-muted-foreground">{results.length} shown</span>
+        </div>
+      </div>
+
+      {/* On-screen: paginated, page-by-page. Hidden entirely when printing. */}
+      <div className="surface overflow-hidden print:hidden">
         {loading ? (
           <div className="p-14 text-center">
             <div className="mono text-xs text-muted-foreground">LOADING…</div>
@@ -661,9 +807,12 @@ function ActivitySection() {
                     </div>
                   </div>
                   <div className="min-w-0">
-                    <div className="text-sm font-medium">
+                    <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
                       {l.action}
-                      {l.detail && <span className="text-muted-foreground font-normal"> · {l.detail}</span>}
+                      {l.detail && <span className="text-muted-foreground font-normal">· {l.detail}</span>}
+                      <span className="mono text-[9px] uppercase tracking-widest text-muted-foreground border border-border rounded px-1.5 py-0.5">
+                        {activityModule(l.action)}
+                      </span>
                     </div>
                     <div className="text-[11px] text-muted-foreground mono mt-1 flex items-center gap-2">
                       <span>by {l.userName}</span>
@@ -672,9 +821,9 @@ function ActivitySection() {
                     </div>
                   </div>
                   <div className="mono text-[11px] text-muted-foreground text-right whitespace-nowrap">
-                    {d.toLocaleDateString("en-PH", { month: "short", day: "numeric" })}
+                    {d.toLocaleDateString("en-PH", { month: "short", day: "numeric", timeZone: "Asia/Manila" })}
                     <div className="text-[10px] opacity-70">
-                      {d.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit" })}
+                      {d.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Manila" })}
                     </div>
                   </div>
                 </li>
@@ -683,7 +832,34 @@ function ActivitySection() {
           </ol>
         )}
       </div>
-      {!loading && results.length > 0 && <Pagination page={page} totalItems={results.length} onPageChange={setPage} />}
+      {!loading && results.length > 0 && (
+        <div className="print:hidden">
+          <Pagination page={page} totalItems={results.length} onPageChange={setPage} />
+        </div>
+      )}
+
+      {/* Print: every matching entry in full, regardless of the on-screen page. Never shown on screen. */}
+      {!loading && results.length > 0 && (
+        <div className="hidden print:block">
+          <PrintTable
+            dense
+            head={["#", "Action", "Module", "User", "Detail", "Date", "Time"]}
+            rows={results.map((l, i) => {
+              const d = new Date(l.createdAt);
+              return [
+                String(results.length - i).padStart(3, "0"),
+                l.action,
+                activityModule(l.action),
+                l.userName,
+                l.detail ?? "",
+                d.toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric", timeZone: "Asia/Manila" }),
+                d.toLocaleTimeString("en-PH", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Manila" }),
+              ];
+            })}
+            align={["right", "left", "left", "left", "left", "right", "right"]}
+          />
+        </div>
+      )}
     </div>
   );
 }

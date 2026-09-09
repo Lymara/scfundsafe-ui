@@ -6,6 +6,8 @@ import { FileBarChart, Printer, Download, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
 import { toTitleCase } from "@/lib/utils";
 import { DatePicker } from "@/components/date-picker";
+import { Pagination, paginate } from "@/components/pagination";
+import { PrintTable } from "@/components/print-table";
 import bitsLogo from "@/assets/bits-logo.png";
 
 export default function ReportsPage() {
@@ -25,6 +27,8 @@ function ReportsView() {
   const [generated, setGenerated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [records, setRecords] = useState<FundRecordDto[]>([]);
+  const [txPage, setTxPage] = useState(1);
+  const [outstandingPage, setOutstandingPage] = useState(1);
   const [fees, setFees] = useState<FeeDto[]>([]);
   const [students, setStudents] = useState<StudentDto[]>([]);
   const [totals, setTotals] = useState({ income: 0, expense: 0, balance: 0 });
@@ -64,6 +68,8 @@ function ReportsView() {
       ]);
       const data = "records" in reportResult ? reportResult : reportResult.data;
       setRecords(data.records);
+      setTxPage(1);
+      setOutstandingPage(1);
       setTotals({ income: data.totalIncome, expense: data.totalExpense, balance: data.remainingBalance });
       setFees(feesData);
       setStudents(studentsData);
@@ -249,7 +255,7 @@ function ReportsView() {
           {/* ---- Section: Financial Summary ---- */}
           {includeSections.summary && (
             <ReportSection title={`${nextSection()}. Financial Summary`} subtitle="Fund position for the selected period">
-              <div className="grid md:grid-cols-3 gap-4 print:grid-cols-3">
+              <div className="grid md:grid-cols-3 gap-4 print:grid-cols-3 print:break-inside-avoid">
                 <Stat label="Total income" value={totals.income} tone="emerald" />
                 <Stat label="Total expense" value={totals.expense} tone="destructive" />
                 <Stat label="Remaining balance" value={totals.balance} tone="gradient" />
@@ -259,7 +265,7 @@ function ReportsView() {
 
           {/* ---- Section: Charts ---- */}
           {includeSections.charts && (monthly.length > 0 || byMethod.length > 0 || students.length > 0) && (
-            <ReportSection title={`${nextSection()}. Charts`} subtitle="Cash flow, collections by payment method, and standing by year level" pageBreakBefore>
+            <ReportSection title={`${nextSection()}. Charts`} subtitle="Cash flow, collections by payment method, and standing by year level">
               <div className="grid md:grid-cols-2 gap-6 print-avoid-break">
                 {monthly.length > 0 && (
                   <div className="surface p-5 print:border print:border-black/20 print:rounded-none print:shadow-none print:bg-transparent">
@@ -332,22 +338,46 @@ function ReportsView() {
 
               {outstanding.length > 0 && (
                 <div className="mt-6">
-                  <div className="text-xs font-semibold mb-2 print:text-black">
-                    Students with an outstanding balance ({outstanding.length})
+                  <div className="flex items-center justify-between gap-4 flex-wrap mb-2 print:break-after-avoid">
+                    <div className="text-xs font-semibold print:text-black">
+                      Students with an outstanding balance ({outstanding.length})
+                    </div>
+                    <div className="print:hidden">
+                      <Pagination page={outstandingPage} totalItems={outstanding.length} onPageChange={setOutstandingPage} />
+                    </div>
                   </div>
-                  <PrintTable
-                    dense
-                    head={["Student No.", "Full Name", "Year", "Status", "Paid", "Balance"]}
-                    rows={outstanding.map((s) => [
-                      s.studentNumber,
-                      toTitleCase(s.fullName),
-                      String(s.yearLevel),
-                      s.status,
-                      formatPHP(s.totalPaid),
-                      formatPHP(s.balance),
-                    ])}
-                    align={["left", "left", "right", "left", "right", "right"]}
-                  />
+                  {/* On-screen: paginated, page-by-page. Hidden entirely when printing. */}
+                  <div className="print:hidden">
+                    <PrintTable
+                      dense
+                      head={["Student No.", "Full Name", "Year", "Status", "Paid", "Balance"]}
+                      rows={paginate(outstanding, outstandingPage).map((s) => [
+                        s.studentNumber,
+                        toTitleCase(s.fullName),
+                        String(s.yearLevel),
+                        s.status,
+                        formatPHP(s.totalPaid),
+                        formatPHP(s.balance),
+                      ])}
+                      align={["left", "left", "right", "left", "right", "right"]}
+                    />
+                  </div>
+                  {/* Print: every student in full, regardless of the on-screen page. Never shown on screen. */}
+                  <div className="hidden print:block">
+                    <PrintTable
+                      dense
+                      head={["Student No.", "Full Name", "Year", "Status", "Paid", "Balance"]}
+                      rows={outstanding.map((s) => [
+                        s.studentNumber,
+                        toTitleCase(s.fullName),
+                        String(s.yearLevel),
+                        s.status,
+                        formatPHP(s.totalPaid),
+                        formatPHP(s.balance),
+                      ])}
+                      align={["left", "left", "right", "left", "right", "right"]}
+                    />
+                  </div>
                 </div>
               )}
             </ReportSection>
@@ -358,7 +388,11 @@ function ReportsView() {
             <ReportSection
               title={`${nextSection()}. All Transactions`}
               subtitle={`Every income and expense record for the selected period (${records.length} total)`}
-              pageBreakBefore
+              actions={
+                records.length > 0 && (
+                  <Pagination page={txPage} totalItems={records.length} onPageChange={setTxPage} />
+                )
+              }
             >
               {records.length === 0 ? (
                 <div className="surface p-14 text-center print:border print:border-black/20">
@@ -366,18 +400,40 @@ function ReportsView() {
                   <div className="mt-2 text-sm text-muted-foreground">No report data for the selected period.</div>
                 </div>
               ) : (
-                <PrintTable
-                  head={["Date", "Type", "Description", "Method", "Amount"]}
-                  rows={records.map((t) => [
-                    t.recordDate.slice(0, 10),
-                    t.recordType,
-                    t.recordType === "Income" ? `${t.source ?? ""} — ${t.purpose ?? ""}` : t.purpose ?? "",
-                    t.paymentMethod ?? "—",
-                    `${t.recordType === "Income" ? "+" : "−"}${formatPHP(t.amount)}`,
-                  ])}
-                  align={["left", "left", "left", "left", "right"]}
-                  amountColorRows={records.map((t) => (t.recordType === "Income" ? "emerald" : "destructive"))}
-                />
+                <>
+                  {/* On-screen: paginated, page-by-page. Hidden entirely when printing. */}
+                  <div className="print:hidden">
+                    <PrintTable
+                      head={["Date", "Type", "Description", "Method", "Amount"]}
+                      rows={paginate(records, txPage).map((t) => [
+                        t.recordDate.slice(0, 10),
+                        t.recordType,
+                        t.recordType === "Income" ? `${t.source ?? ""} — ${t.purpose ?? ""}` : t.purpose ?? "",
+                        t.paymentMethod ?? "—",
+                        `${t.recordType === "Income" ? "+" : "−"}${formatPHP(t.amount)}`,
+                      ])}
+                      align={["left", "left", "left", "left", "right"]}
+                      amountColorRows={paginate(records, txPage).map((t) =>
+                        t.recordType === "Income" ? "emerald" : "destructive",
+                      )}
+                    />
+                  </div>
+                  {/* Print: every record in full, regardless of the on-screen page. Never shown on screen. */}
+                  <div className="hidden print:block">
+                    <PrintTable
+                      head={["Date", "Type", "Description", "Method", "Amount"]}
+                      rows={records.map((t) => [
+                        t.recordDate.slice(0, 10),
+                        t.recordType,
+                        t.recordType === "Income" ? `${t.source ?? ""} — ${t.purpose ?? ""}` : t.purpose ?? "",
+                        t.paymentMethod ?? "—",
+                        `${t.recordType === "Income" ? "+" : "−"}${formatPHP(t.amount)}`,
+                      ])}
+                      align={["left", "left", "left", "left", "right"]}
+                      amountColorRows={records.map((t) => (t.recordType === "Income" ? "emerald" : "destructive"))}
+                    />
+                  </div>
+                </>
               )}
             </ReportSection>
           )}
@@ -396,86 +452,34 @@ function ReportSection({
   title,
   subtitle,
   children,
-  pageBreakBefore,
+  actions,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
-  pageBreakBefore?: boolean;
+  /** Optional control (e.g. pagination) shown top-right, next to the title. Screen-only - never printed. */
+  actions?: React.ReactNode;
 }) {
   return (
-    <section className={pageBreakBefore ? "print-page-break print-avoid-break" : "print-avoid-break"}>
-      <div className="mb-4">
-        <div className="display text-xl print:text-base print:font-bold">{title}</div>
-        {subtitle && <div className="text-xs text-muted-foreground mt-1 print:text-black/60">{subtitle}</div>}
+    <section>
+      {/*
+        No forced page-break here on purpose. Forcing a section to always
+        start on a fresh page (regardless of how much room is left on the
+        current one) is what caused whole pages to print almost empty.
+        Instead we just keep the title glued to whatever comes right after
+        it (print:break-after-avoid), so the title itself never gets
+        stranded alone at the bottom of a page - everything else is left to
+        flow and fill the page naturally.
+      */}
+      <div className="mb-4 flex items-start justify-between gap-4 flex-wrap print:break-after-avoid">
+        <div>
+          <div className="display text-xl print:text-base print:font-bold">{title}</div>
+          {subtitle && <div className="text-xs text-muted-foreground mt-1 print:text-black/60">{subtitle}</div>}
+        </div>
+        {actions && <div className="print:hidden">{actions}</div>}
       </div>
       {children}
     </section>
-  );
-}
-
-function PrintTable({
-  head,
-  rows,
-  align,
-  foot,
-  dense,
-  amountColorRows,
-}: {
-  head: string[];
-  rows: string[][];
-  align?: ("left" | "right")[];
-  foot?: string[];
-  dense?: boolean;
-  amountColorRows?: ("emerald" | "destructive")[];
-}) {
-  const cellClass = (i: number) => (align?.[i] === "right" ? "text-right" : "text-left");
-  const pad = dense ? "px-3 py-2" : "px-4 py-2.5";
-
-  return (
-    <div className="surface overflow-hidden print:border print:border-black/20 print:rounded-none print:shadow-none print:bg-transparent">
-      <table className="w-full text-xs md:text-sm">
-        <thead>
-          <tr className="eyebrow text-left bg-muted/40 print:bg-black/5">
-            {head.map((h, i) => (
-              <th key={h} className={`${pad} font-semibold print:text-black print:font-bold ${cellClass(i)}`}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-border/70 print:divide-black/10">
-          {rows.map((row, ri) => (
-            <tr key={ri} className="print-avoid-break">
-              {row.map((cell, ci) => {
-                const isAmountCol = ci === row.length - 1 && amountColorRows;
-                const colorCls = isAmountCol
-                  ? amountColorRows[ri] === "emerald"
-                    ? "text-emerald print:text-black print:font-medium"
-                    : "text-destructive print:text-black print:font-medium"
-                  : "";
-                return (
-                  <td key={ci} className={`${pad} mono print:font-sans print:text-black ${cellClass(ci)} ${colorCls}`}>
-                    {cell}
-                  </td>
-                );
-              })}
-            </tr>
-          ))}
-        </tbody>
-        {foot && (
-          <tfoot>
-            <tr className="border-t-2 border-border font-semibold print:border-black/40">
-              {foot.map((f, i) => (
-                <td key={i} className={`${pad} mono print:font-sans print:text-black ${cellClass(i)}`}>
-                  {f}
-                </td>
-              ))}
-            </tr>
-          </tfoot>
-        )}
-      </table>
-    </div>
   );
 }
 

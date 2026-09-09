@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { useAuth, formatPHP } from "@/lib/auth-context";
 import { SelectPicker } from "@/components/select-picker";
 import { DatePicker } from "@/components/date-picker";
-import { ReferenceNumberField } from "@/components/reference-field";
+import { ReferenceNumberField, extractReferenceNumber } from "@/components/reference-field";
 import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 import { EyeGlyph } from "@/components/pw-input";
 import {
@@ -33,6 +33,8 @@ import {
   Pencil,
   Trash2,
   ImageOff,
+  ArrowLeft,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn, toTitleCase } from "@/lib/utils";
@@ -656,7 +658,140 @@ function StudentDetailModal({
 }) {
   const [fees, setFees] = useState<StudentFeeStatusDto[] | null>(null);
   const [history, setHistory] = useState<StudentFeePaymentDto[] | null>(null);
-  const [viewingReceipt, setViewingReceipt] = useState<StudentFeePaymentDto | null>(null);
+
+  // The receipt photo opens as its own drawer pinned to the right edge of
+  // the screen, next to the modal, instead of swapping out the modal's own
+  // content. `receiptPayment` is which payment (if any) the drawer is
+  // showing - it stays mounted for the ~300ms of the close animation so it
+  // can visibly slide back out, rather than vanishing instantly. `receiptOpen`
+  // is just the on/off switch for the slide position itself.
+  const [receiptPayment, setReceiptPayment] = useState<StudentFeePaymentDto | null>(null);
+  const [receiptOpen, setReceiptOpen] = useState(false);
+
+  // Tracks the edit-photo affordance in the receipt drawer: `photoVersion`
+  // is bumped after a successful change/remove to force ReceiptPhoto to
+  // refetch (via its `key`), `photoStatus` mirrors what ReceiptPhoto is
+  // currently showing so "Remove photo" can be disabled when there's
+  // nothing to remove.
+  const [photoVersion, setPhotoVersion] = useState(0);
+  const [photoStatus, setPhotoStatus] = useState<"loading" | "ready" | "missing" | "error">("loading");
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Full edit mode (amount + reference, on top of the photo itself) for the
+  // currently-open payment/refund row. Editing the amount is re-validated
+  // server-side and, on success, cascades into the roster total (roster's
+  // AmountPaid) and the linked Fees & Sources ledger entry.
+  const [editMode, setEditMode] = useState(false);
+  const [editAmount, setEditAmount] = useState("");
+  const [editReference, setEditReference] = useState("");
+  const [editMethod, setEditMethod] = useState<PaymentMethod>("Cash");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const openReceipt = (p: StudentFeePaymentDto) => {
+    setReceiptPayment(p);
+    setPhotoVersion(0);
+    setPhotoStatus("loading");
+    setEditMode(false);
+    setEditAmount(String(p.amount));
+    setEditReference(p.reference ?? "");
+    setEditMethod(p.paymentMethod);
+    // Double rAF: guarantees the browser has painted one frame with the
+    // drawer already mounted off-screen before we flip it to open -
+    // otherwise the browser can collapse the "closed -> open" change into a
+    // single frame and the slide never visibly animates.
+    requestAnimationFrame(() => requestAnimationFrame(() => setReceiptOpen(true)));
+  };
+  const closeReceipt = () => setReceiptOpen(false);
+  const handleDismiss = () => {
+    if (receiptPayment) closeReceipt();
+    onClose();
+  };
+
+  const handleChangePhotoClick = () => {
+    photoFileInputRef.current?.click();
+  };
+
+  const handlePhotoFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const file = e.target.files?.[0];
+  e.target.value = "";
+  if (!file || !receiptPayment) return;
+  setPhotoBusy(true);
+  try {
+    let scannedReference: string | undefined;
+    try {
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker("eng");
+      try {
+        const { data } = await worker.recognize(file);
+        scannedReference = extractReferenceNumber(data.text) ?? undefined;
+      } finally {
+        await worker.terminate();
+      }
+    } catch {
+      // Scan failed - fall through and just swap the photo, keeping the existing reference.
+    }
+
+    await api.uploadReceipt(receiptPayment.paymentId, file, scannedReference);
+    setPhotoVersion((v) => v + 1);
+    if (scannedReference) {
+      setReceiptPayment((p) => (p ? { ...p, reference: scannedReference! } : p));
+      setHistory((h) => h?.map((p) => (p.paymentId === receiptPayment.paymentId ? { ...p, reference: scannedReference! } : p)) ?? h);
+      toast.success(`Receipt photo updated — reference set to ${scannedReference}`);
+    } else {
+      toast.success("Receipt photo updated");
+    }
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "Failed to update the receipt photo");
+  } finally {
+    setPhotoBusy(false);
+  }
+};
+
+  const handleRemovePhoto = async () => {
+    if (!receiptPayment) return;
+    if (!window.confirm("Remove the attached receipt photo? This can't be undone.")) return;
+    setPhotoBusy(true);
+    try {
+      await api.deleteReceipt(receiptPayment.paymentId);
+      setPhotoVersion((v) => v + 1);
+      toast.success("Receipt photo removed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove the receipt photo");
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!receiptPayment) return;
+    const amountNum = parseFloat(editAmount);
+    if (!editAmount || Number.isNaN(amountNum) || amountNum <= 0) {
+      toast.error("Enter a valid amount greater than 0");
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      const { data } = await api.updatePayment(receiptPayment.paymentId, {
+        amount: amountNum,
+        reference: editReference.trim() || undefined,
+        paymentDate: receiptPayment.paymentDate,
+        paymentMethod: editMethod,
+      });
+      // Reflects everywhere at once: this drawer, the payment-history list
+      // behind it, and (via the fee refetch) the fee-breakdown / roster
+      // totals shown in the rest of the modal.
+      setReceiptPayment(data);
+      setHistory((h) => h?.map((p) => (p.paymentId === data.paymentId ? data : p)) ?? h);
+      api.getStudentFees(student.studentId).then(setFees).catch(() => {});
+      setEditMode(false);
+      toast.success(receiptPayment.isRefund ? "Refund updated" : "Payment updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update this entry");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
   useEffect(() => {
     api
@@ -669,220 +804,374 @@ function StudentDetailModal({
       .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load payment history"));
   }, [student.studentId]);
 
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") handleDismiss();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiptPayment]);
+
   return (
-    <ModalShell
-      title={toTitleCase(student.fullName)}
-      subtitle={`${student.studentNumber} · Year ${student.yearLevel}${student.section ? ` · ${student.section}` : ""}`}
-      onClose={onClose}
-      wide
+    <div
+      className="fixed inset-0 z-50 grid place-items-center p-4 bg-foreground/30 backdrop-blur-sm animate-fade-in"
+      onClick={handleDismiss}
     >
-      <div className="space-y-6">
-        <div className="grid grid-cols-3 gap-3">
-          <div className="surface p-4">
-            <div className="eyebrow">Due</div>
-            <div className="mono mt-2">{formatPHP(student.totalDue)}</div>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="surface-lift w-full max-w-xl p-8 animate-scale-in max-h-[86vh] flex flex-col"
+      >
+        <div className="flex items-start justify-between gap-4 shrink-0">
+          <div className="min-w-0">
+            <div className="eyebrow">Students</div>
+            <h3 className="display text-2xl mt-1 truncate">{toTitleCase(student.fullName)}</h3>
+            <p className="text-xs text-muted-foreground mt-1 truncate">
+              {student.studentNumber} · Year {student.yearLevel}
+              {student.section ? ` · ${student.section}` : ""}
+            </p>
           </div>
-          <div className="surface p-4">
-            <div className="eyebrow">Paid</div>
-            <div className="mono mt-2 text-emerald">{formatPHP(student.totalPaid)}</div>
-          </div>
-          <div className="surface p-4">
-            <div className="eyebrow">Balance</div>
-            <div className={cn("mono mt-2", student.balance > 0 ? "text-destructive" : "text-muted-foreground")}>
-              {formatPHP(student.balance)}
-            </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="p-2 -m-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
         </div>
+        <div className="hairline-b mt-6 shrink-0" />
 
-        <div>
-          <div className="eyebrow mb-2">Fee breakdown</div>
-          {fees === null ? (
-            <div className="text-xs text-muted-foreground">Loading…</div>
-          ) : fees.length === 0 ? (
-            <div className="text-xs text-muted-foreground">No fees apply to this student yet.</div>
-          ) : (
-            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-              {fees.map((f) => {
-                const settled = f.status === "Paid";
-                const partial = f.status === "Partial";
-                return (
-                  <div key={f.feeId} className="flex items-center justify-between rounded-lg border border-border/70 px-3.5 py-2.5">
-                    <div className="flex items-center gap-2.5 text-sm min-w-0">
-                      {settled ? (
-                        <CheckCircle2 className="h-4 w-4 text-emerald shrink-0" />
-                      ) : partial ? (
-                        <CircleDot className="h-4 w-4 text-amber shrink-0" />
-                      ) : (
-                        <CircleDashed className="h-4 w-4 text-muted-foreground shrink-0" />
-                      )}
-                      <span className="truncate">{f.feeName}</span>
-                    </div>
-                    <div className="mono text-xs shrink-0 ml-2">
-                      {formatPHP(f.amountPaid)} <span className="text-muted-foreground">/ {formatPHP(f.amountDue)}</span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        <div>
-          <div className="eyebrow mb-2">Payment history</div>
-          {history === null ? (
-            <div className="text-xs text-muted-foreground">Loading…</div>
-          ) : history.length === 0 ? (
-            <div className="text-xs text-muted-foreground">No payments yet.</div>
-          ) : (
-            <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
-              {history.map((p) => (
-                <div
-                  key={p.paymentId}
-                  onClick={p.reference ? () => setViewingReceipt(p) : undefined}
-                  className={cn(
-                    "flex items-center justify-between rounded-lg bg-muted/40 px-3.5 py-2.5 transition",
-                    p.reference && "cursor-pointer hover:bg-muted/70",
-                  )}
-                >
-                  <div className="min-w-0">
-                    <div className="text-sm truncate">
-                      {p.feeName}
-                      {p.isRefund && (
-                        <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive ml-2">
-                          Refund
-                        </span>
-                      )}
-                    </div>
-                    <div className="mono text-[10px] text-muted-foreground mt-0.5">
-                      {new Date(p.paymentDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} ·{" "}
-                      {p.paymentMethod}
-                      {p.reference ? ` · ${p.reference}` : ""}
-                    </div>
-                  </div>
-                  <span className={cn("mono text-sm shrink-0 ml-2", p.isRefund ? "text-destructive" : "text-emerald")}>
-                    {p.isRefund ? "−" : ""}
-                    {formatPHP(p.amount)}
-                  </span>
+        <div className="overflow-y-auto flex-1 -mx-8 px-8 mt-6">
+          <div className="space-y-6">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="surface p-4">
+                  <div className="eyebrow">Due</div>
+                  <div className="mono mt-2">{formatPHP(student.totalDue)}</div>
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
+                <div className="surface p-4">
+                  <div className="eyebrow">Paid</div>
+                  <div className="mono mt-2 text-emerald">{formatPHP(student.totalPaid)}</div>
+                </div>
+                <div className="surface p-4">
+                  <div className="eyebrow">Balance</div>
+                  <div className={cn("mono mt-2", student.balance > 0 ? "text-destructive" : "text-muted-foreground")}>
+                    {formatPHP(student.balance)}
+                  </div>
+                </div>
+              </div>
 
-        {canRecordPayment && student.status !== "Paid" && (
-          <button onClick={onCollectPayment} className="btn btn-primary w-full">
-            <Wallet className="h-4 w-4" /> Collect payment
-          </button>
+              <div>
+                <div className="eyebrow mb-2">Fee breakdown</div>
+                {fees === null ? (
+                  <div className="text-xs text-muted-foreground">Loading…</div>
+                ) : fees.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">No fees apply to this student yet.</div>
+                ) : (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    {fees.map((f) => {
+                      const settled = f.status === "Paid";
+                      const partial = f.status === "Partial";
+                      return (
+                        <div key={f.feeId} className="flex items-center justify-between rounded-lg border border-border/70 px-3.5 py-2.5">
+                          <div className="flex items-center gap-2.5 text-sm min-w-0">
+                            {settled ? (
+                              <CheckCircle2 className="h-4 w-4 text-emerald shrink-0" />
+                            ) : partial ? (
+                              <CircleDot className="h-4 w-4 text-amber shrink-0" />
+                            ) : (
+                              <CircleDashed className="h-4 w-4 text-muted-foreground shrink-0" />
+                            )}
+                            <span className="truncate">{f.feeName}</span>
+                          </div>
+                          <div className="mono text-xs shrink-0 ml-2">
+                            {formatPHP(f.amountPaid)} <span className="text-muted-foreground">/ {formatPHP(f.amountDue)}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <div className="eyebrow mb-2">Payment history</div>
+                {history === null ? (
+                  <div className="text-xs text-muted-foreground">Loading…</div>
+                ) : history.length === 0 ? (
+                  <div className="text-xs text-muted-foreground">No payments yet.</div>
+                ) : (
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                    {history.map((p) => (
+                      <div
+                        key={p.paymentId}
+                        onClick={() => openReceipt(p)}
+                        className="flex items-center justify-between rounded-lg bg-muted/40 px-3.5 py-2.5 transition cursor-pointer hover:bg-muted/70"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm truncate">
+                            {p.feeName}
+                            {p.isRefund && (
+                              <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive ml-2">
+                                Refund
+                              </span>
+                            )}
+                          </div>
+                          <div className="mono text-[10px] text-muted-foreground mt-0.5">
+                            {new Date(p.paymentDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} ·{" "}
+                            {p.paymentMethod}
+                            {p.reference ? ` · ${p.reference}` : ""}
+                          </div>
+                        </div>
+                        <span className={cn("mono text-sm shrink-0 ml-2", p.isRefund ? "text-destructive" : "text-emerald")}>
+                          {p.isRefund ? "−" : ""}
+                          {formatPHP(p.amount)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {canRecordPayment && student.status !== "Paid" && (
+                <button onClick={onCollectPayment} className="btn btn-primary w-full">
+                  <Wallet className="h-4 w-4" /> Collect payment
+                </button>
+              )}
+          </div>
+        </div>
+      </div>
+
+      {/* Receipt drawer - pinned to the right edge of the screen, beside the
+          modal rather than inside it. It stays mounted for the ~300ms of the
+          close animation so it can visibly slide back out, rather than
+          vanishing instantly. */}
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={cn(
+          "fixed inset-y-0 right-0 z-[60] w-full max-w-sm p-6 sm:p-8 flex flex-col",
+          "surface-lift !rounded-none !border-y-0 !border-r-0 shadow-2xl",
+          "transition-transform duration-300 ease-out",
+          receiptOpen ? "translate-x-0" : "translate-x-full",
+        )}
+        onTransitionEnd={(e) => {
+          if (e.propertyName === "transform" && !receiptOpen) setReceiptPayment(null);
+        }}
+      >
+        {receiptPayment && (
+          <>
+            <div className="flex items-start justify-between gap-4 shrink-0">
+              <div className="min-w-0">
+                <button onClick={closeReceipt} className="eyebrow flex items-center gap-1 hover:text-foreground transition">
+                  <ArrowLeft className="h-3 w-3" /> Back
+                </button>
+                <h3 className="display text-2xl mt-1 truncate">{receiptPayment.feeName}</h3>
+                <p className="text-xs text-muted-foreground mt-1 truncate">
+                  {new Date(receiptPayment.paymentDate).toLocaleDateString("en-PH", {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                  })}{" "}
+                  · {receiptPayment.paymentMethod}
+                  {receiptPayment.reference ? ` · ${receiptPayment.reference}` : ""}
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className={cn("mono text-sm font-semibold", receiptPayment.isRefund ? "text-destructive" : "text-emerald")}>
+                    {receiptPayment.isRefund ? "−" : ""}
+                    {formatPHP(receiptPayment.amount)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={closeReceipt}
+                    className="p-2 -m-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditMode((o) => !o)}
+                  disabled={photoBusy || savingEdit}
+                  className={cn(
+                    "p-2 rounded-md border transition disabled:opacity-50",
+                    editMode
+                      ? "border-primary/50 text-primary bg-primary/10"
+                      : "border-border/70 text-muted-foreground hover:text-foreground hover:bg-muted",
+                  )}
+                  title={receiptPayment.isRefund ? "Edit refund" : "Edit payment"}
+                  aria-label={receiptPayment.isRefund ? "Edit refund" : "Edit payment"}
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+
+            {editMode && (
+              <div className="mt-4 p-5 rounded-xl border border-border/70 bg-muted/30 space-y-5 shrink-0">
+                <div className="space-y-3">
+                  <div className="eyebrow">Details</div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+                    <label className="field is-filled">
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={editAmount}
+                        onChange={(e) => setEditAmount(e.target.value)}
+                      />
+                      <span className="field-label">Amount</span>
+                    </label>
+                    <label className={"field" + (editReference ? " is-filled" : "")}>
+                      <input
+                        value={editReference}
+                        onChange={(e) => setEditReference(e.target.value)}
+                        maxLength={50}
+                        placeholder="REF-000123"
+                      />
+                      <span className="field-label">Reference</span>
+                    </label>
+                    <div className="col-span-2">
+                      <SelectPicker
+                        label="Payment method"
+                        value={editMethod}
+                        options={[...PAYMENT_METHODS]}
+                        onChange={(v) => setEditMethod(v as PaymentMethod)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="hairline-b" />
+
+                <div className="space-y-3">
+                  <div className="eyebrow">Receipt photo</div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleChangePhotoClick}
+                      disabled={photoBusy}
+                      className="btn btn-ghost flex-1 justify-center !gap-1.5 !px-2 text-xs whitespace-nowrap"
+                    >
+                      <Pencil className="h-3.5 w-3.5 shrink-0" /> Change photo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleRemovePhoto}
+                      disabled={photoBusy || photoStatus !== "ready"}
+                      className="btn btn-ghost flex-1 justify-center !gap-1.5 !px-2 text-xs whitespace-nowrap text-destructive disabled:opacity-40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5 shrink-0" /> Remove photo
+                    </button>
+                    <input
+                      ref={photoFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handlePhotoFileSelected}
+                    />
+                  </div>
+                </div>
+
+                <div className="hairline-b" />
+
+                <div className="flex items-center justify-end gap-3">
+                  <button type="button" onClick={() => setEditMode(false)} className="btn btn-ghost">
+                    Cancel
+                  </button>
+                  <button type="button" onClick={handleSaveEdit} disabled={savingEdit} className="btn btn-primary">
+                    {savingEdit ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Save changes"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="hairline-b mt-6 shrink-0" />
+            <div className="overflow-y-auto flex-1 mt-6">
+              <ReceiptPhoto
+                key={photoVersion}
+                paymentId={receiptPayment.paymentId}
+                feeName={receiptPayment.feeName}
+                onStatusChange={setPhotoStatus}
+              />
+            </div>
+          </>
         )}
       </div>
-      {viewingReceipt && <ReceiptViewerModal payment={viewingReceipt} onClose={() => setViewingReceipt(null)} />}
-    </ModalShell>
+    </div>
   );
 }
 
-function ReceiptViewerModal({ payment, onClose }: { payment: StudentFeePaymentDto; onClose: () => void }) {
+/** Just the photo-loading body used inside the StudentDetailModal's receipt drawer. */
+function ReceiptPhoto({
+  paymentId,
+  feeName,
+  onStatusChange,
+}: {
+  paymentId: number;
+  feeName: string;
+  onStatusChange?: (status: "loading" | "ready" | "missing" | "error") => void;
+}) {
   const [imgUrl, setImgUrl] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "missing" | "error">("loading");
 
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
+    setState("loading");
+    setImgUrl(null);
+    onStatusChange?.("loading");
     (async () => {
       try {
-        const blob = await api.fetchReceiptBlob(payment.paymentId);
+        const blob = await api.fetchReceiptBlob(paymentId);
         objectUrl = URL.createObjectURL(blob);
         if (!cancelled) {
           setImgUrl(objectUrl);
           setState("ready");
+          onStatusChange?.("ready");
         }
       } catch (err) {
         if (cancelled) return;
         // A 404 here means this specific payment just never had a photo
         // attached - that's a normal, expected outcome, not a failure.
-        setState(err instanceof ApiError && err.status === 404 ? "missing" : "error");
+        const next = err instanceof ApiError && err.status === 404 ? "missing" : "error";
+        setState(next);
+        onStatusChange?.(next);
       }
     })();
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [payment.paymentId]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paymentId]);
 
   return (
-    <div
-      className="fixed inset-0 z-[70] grid place-items-center p-4 md:p-8 bg-black/70 backdrop-blur-md animate-fade-in"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-md surface-lift overflow-hidden shadow-2xl ring-1 ring-white/10 animate-scale-in"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* Header - who/what this receipt is for, so the photo has context */}
-        <div className="flex items-start justify-between gap-4 px-5 py-4 hairline-b bg-black/20">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold truncate flex items-center gap-2">
-              {payment.feeName}
-              {payment.isRefund && (
-                <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive shrink-0">
-                  Refund
-                </span>
-              )}
-            </div>
-            <div className="mono text-[11px] text-muted-foreground mt-0.5 truncate">
-              {new Date(payment.paymentDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })} ·{" "}
-              {payment.paymentMethod}
-              {payment.reference ? ` · ${payment.reference}` : ""}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className={cn("mono text-sm font-semibold", payment.isRefund ? "text-destructive" : "text-emerald")}>
-              {payment.isRefund ? "−" : ""}
-              {formatPHP(payment.amount)}
-            </span>
-            <button
-              onClick={onClose}
-              className="p-1.5 -m-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-white/10 transition"
-              aria-label="Close"
-            >
-              <X className="h-4 w-4" />
-            </button>
+    <div className="bg-black/30 rounded-xl min-h-[16rem] grid place-items-center p-4">
+      {state === "missing" ? (
+        <div className="text-center py-10 px-4">
+          <ImageOff className="h-8 w-8 text-muted-foreground/60 mx-auto mb-3" />
+          <div className="text-sm text-muted-foreground">No photo available</div>
+          <div className="text-xs text-muted-foreground/70 mt-1 max-w-xs">
+            This payment was recorded without an attached reference photo.
           </div>
         </div>
-
-        {/* Body - the photo itself, or a clear explanation of why there isn't one */}
-        <div className="bg-black/30 min-h-[16rem] grid place-items-center p-4">
-          {state === "missing" ? (
-            <div className="text-center py-10 px-4">
-              <ImageOff className="h-8 w-8 text-muted-foreground/60 mx-auto mb-3" />
-              <div className="text-sm text-muted-foreground">No photo available</div>
-              <div className="text-xs text-muted-foreground/70 mt-1 max-w-xs">
-                This payment was recorded without an attached reference photo.
-              </div>
-            </div>
-          ) : state === "error" ? (
-            <div className="text-center py-10 px-4">
-              <ImageOff className="h-8 w-8 text-destructive/60 mx-auto mb-3" />
-              <div className="text-sm text-muted-foreground">Couldn't load the receipt photo.</div>
-              <div className="text-xs text-muted-foreground/70 mt-1">Please try again in a moment.</div>
-            </div>
-          ) : state === "ready" && imgUrl ? (
-            <img src={imgUrl} alt={`Receipt for ${payment.feeName}`} className="max-h-[70vh] w-full object-contain rounded-lg" />
-          ) : (
-            <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground">
-              <div className="h-6 w-6 rounded-full border-2 border-current border-t-transparent animate-spin" />
-              <div className="text-xs">Loading photo…</div>
-            </div>
-          )}
+      ) : state === "error" ? (
+        <div className="text-center py-10 px-4">
+          <ImageOff className="h-8 w-8 text-destructive/60 mx-auto mb-3" />
+          <div className="text-sm text-muted-foreground">Couldn't load the receipt photo.</div>
+          <div className="text-xs text-muted-foreground/70 mt-1">Please try again in a moment.</div>
         </div>
-      </div>
+      ) : state === "ready" && imgUrl ? (
+        <img src={imgUrl} alt={`Receipt for ${feeName}`} className="max-h-[60vh] w-full object-contain rounded-lg" />
+      ) : (
+        <div className="flex flex-col items-center gap-3 py-10 text-muted-foreground">
+          <div className="h-6 w-6 rounded-full border-2 border-current border-t-transparent animate-spin" />
+          <div className="text-xs">Loading photo…</div>
+        </div>
+      )}
     </div>
   );
 }

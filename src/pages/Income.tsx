@@ -9,6 +9,7 @@ import {
   type FeeDto,
   type StudentFeeStatusDto,
   type YearLevel,
+  type FundRecordDto,
 } from "@/lib/api";
 import { TrendingUp, ArrowRight, ArrowLeft, Wallet, Plus, X, Search, CheckCircle2, CircleDot, CircleDashed, Calendar, Pencil, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
@@ -17,32 +18,31 @@ import { SelectPicker } from "@/components/select-picker";
 import { DatePicker } from "@/components/date-picker";
 import { ReferenceNumberField } from "@/components/reference-field";
 import { Pagination, paginate } from "@/components/pagination";
+import { SectionNav, type SectionNavItem } from "@/components/section-nav";
 
 export default function IncomePage() {
   const { currentUser } = useAuth();
   const isAdmin = currentUser?.role === "Admin";
-  const [tab, setTab] = useState<"income" | "fees">(isAdmin ? "fees" : "income");
+  const canManage = currentUser?.role === "Treasurer";
+  const [tab, setTab] = useState<"income" | "fees" | "manage">(isAdmin ? "fees" : "income");
+
+  const navItems: SectionNavItem<"income" | "fees" | "manage">[] = [
+    ...(isAdmin ? [] : [{ key: "income" as const, label: "Record Income", icon: TrendingUp }]),
+    { key: "fees", label: "Fees & Sources", icon: Wallet },
+    ...(canManage ? [{ key: "manage" as const, label: "Edit Income", icon: Pencil }] : []),
+  ];
 
   return (
     <AppLayout>
       <div className="space-y-8">
-        {!isAdmin && (
-          <div className="flex items-center gap-1 p-1 bg-muted/60 rounded-lg w-fit">
-            {(["income", "fees"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={cn(
-                  "px-4 py-1.5 rounded-md text-xs font-medium transition",
-                  tab === t ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {t === "income" ? "Record Income" : "Fees & Sources"}
-              </button>
-            ))}
-          </div>
+        <SectionNav items={navItems} active={tab} onChange={setTab} />
+        {tab === "income" && !isAdmin ? (
+          <IncomeForm />
+        ) : tab === "manage" && canManage ? (
+          <ManageIncomeView />
+        ) : (
+          <FeesAndSources canManage={canManage} />
         )}
-        {tab === "income" && !isAdmin ? <IncomeForm /> : <FeesAndSources canManage={currentUser?.role === "Treasurer"} />}
       </div>
     </AppLayout>
   );
@@ -55,10 +55,10 @@ function IncomeForm() {
   const [amount, setAmount] = useState("");
   const [source, setSource] = useState("");
   const [purpose, setPurpose] = useState("");
-  const [notes, setNotes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("");
+  const [reference, setReference] = useState("");
   const [bankName, setBankName] = useState("");
-  const [bankRef, setBankRef] = useState("");
+  const [capturedFile, setCapturedFile] = useState<File | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -72,23 +72,35 @@ function IncomeForm() {
       return toast.error("Please complete all required fields.");
     }
     if (paymentMethod === "Bank Transfer" && !bankName.trim()) return toast.error("Specify the bank");
+    if (paymentMethod && paymentMethod !== "Cash" && !reference.trim()) {
+      return toast.error("Enter a reference number for this payment method");
+    }
     const combinedNotes =
-      paymentMethod === "Bank Transfer" && (bankName.trim() || bankRef.trim())
-        ? [notes.trim(), `Bank transfer: ${bankName.trim()}${bankRef.trim() ? ` — ${bankRef.trim()}` : ""}`]
-            .filter(Boolean)
-            .join(" — ")
-        : notes.trim();
+      paymentMethod && paymentMethod !== "Cash" && reference.trim()
+        ? paymentMethod === "Bank Transfer"
+          ? `Bank transfer: ${bankName.trim()} — ${reference.trim()}`
+          : `Ref: ${reference.trim()}`
+        : undefined;
     setSubmitting(true);
     try {
-      await api.recordIncome({
+      const { data: created } = await api.recordIncome({
         recordDate: date,
         amount: amt,
         source: source.trim(),
         purpose: purpose.trim() || undefined,
-        notes: combinedNotes || undefined,
+        notes: combinedNotes,
         paymentMethod: paymentMethod || undefined,
       });
-      toast.success("Income recorded successfully");
+      let photoAttached = false;
+      if (capturedFile) {
+        try {
+          await api.uploadAttachments(created.recordId, [capturedFile]);
+          photoAttached = true;
+        } catch {
+          toast.error("Income saved, but the receipt photo couldn't be attached.");
+        }
+      }
+      toast.success(photoAttached ? "Income recorded — photo attached" : "Income recorded successfully");
       navigate("/records");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to record income");
@@ -98,7 +110,7 @@ function IncomeForm() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto">
+    <div className="max-w-3xl">
       <button
         onClick={() => navigate("/dashboard")}
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition mb-6"
@@ -151,23 +163,41 @@ function IncomeForm() {
               onChange={setPaymentMethod}
             />
             {paymentMethod === "Bank Transfer" && (
-              <div className="grid sm:grid-cols-2 gap-x-6 gap-y-2">
-                <FloatField label="Bank name / type" value={bankName}>
-                  <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
-                </FloatField>
-                <ReferenceNumberField label="Reference number (optional)" value={bankRef} onChange={setBankRef} />
+              <FloatField label="Bank name / type" value={bankName}>
+                <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="BDO, BPI, Metrobank…" />
+              </FloatField>
+            )}
+            {paymentMethod !== "" && paymentMethod !== "Cash" && (
+              <ReferenceNumberField
+                label="Reference number"
+                value={reference}
+                onChange={setReference}
+                onFileCaptured={setCapturedFile}
+                required
+              />
+            )}
+            {paymentMethod !== "" && paymentMethod !== "Cash" && (
+              <div className={cn("text-xs flex items-center gap-1.5", capturedFile ? "text-emerald" : "text-muted-foreground")}>
+                {capturedFile ? (
+                  <>
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    <span className="truncate">Photo ready to attach: {capturedFile.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setCapturedFile(null)}
+                      className="ml-1 p-0.5 rounded text-muted-foreground hover:text-destructive transition shrink-0"
+                      title="Remove photo"
+                      aria-label="Remove attached photo"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <span>Optional — attach a screenshot of the receipt/confirmation.</span>
+                )}
               </div>
             )}
           </div>
-        </Section>
-
-        <div className="hairline-b" />
-
-        <Section num="03" title="Notes" hint="Optional — any extra context for the record.">
-          <FloatField label="Notes" value={notes}>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={500} />
-          </FloatField>
-          <div className="field-hint text-right">{notes.length}/500</div>
         </Section>
 
         <div className="flex items-center justify-between pt-4 hairline-t -mx-8 md:-mx-10 px-8 md:px-10 pt-6">
@@ -176,6 +206,225 @@ function IncomeForm() {
           </button>
           <button type="submit" disabled={submitting} className="btn btn-primary">
             {submitting ? "Saving…" : "Save income"} <ArrowRight className="h-4 w-4" />
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/* ---------------- Edit Income (UC-07, manually-entered income only) ---------------- */
+
+function ManageIncomeView() {
+  const [records, setRecords] = useState<FundRecordDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
+  const [editing, setEditing] = useState<FundRecordDto | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const all = await api.getAllRecords();
+      // Only manually-entered income is editable here - a fee payment
+      // posted from the Students page must still be corrected there
+      // instead, so the roster total never drifts (see api.updateRecord).
+      const editable = all
+        .filter((r) => r.recordType === "Income" && !r.isStudentPayment)
+        .sort((a, b) => new Date(b.recordDate).getTime() - new Date(a.recordDate).getTime());
+      setRecords(editable);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load income entries");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const results = useMemo(() => {
+    if (!q) return records;
+    const s = q.toLowerCase();
+    return records.filter((r) => (r.source ?? "").toLowerCase().includes(s) || (r.purpose ?? "").toLowerCase().includes(s));
+  }, [records, q]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [q]);
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <div className="eyebrow flex items-center gap-2">
+          <Pencil className="h-3 w-3 text-amber" /> Edit Income
+        </div>
+        <h1 className="display text-4xl md:text-5xl mt-3">Fix a mistake.</h1>
+        <p className="text-muted-foreground mt-3 max-w-lg text-sm leading-relaxed">
+          Correct the date, amount, source, purpose, or payment method on an income entry you typed on
+          this page. Fee payments stay editable only from the Students page, so the roster total never
+          drifts.
+        </p>
+      </header>
+
+      <div className="surface p-2 flex items-center gap-1">
+        <div className="relative flex-1">
+          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search by source or purpose…"
+            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+          />
+        </div>
+        <span className="mono text-[10px] text-muted-foreground pr-3">{results.length} entries</span>
+      </div>
+
+      <div className="surface overflow-hidden">
+        {loading ? (
+          <div className="p-14 text-center">
+            <div className="mono text-xs text-muted-foreground">LOADING…</div>
+          </div>
+        ) : results.length === 0 ? (
+          <div className="p-14 text-center">
+            <div className="mono text-xs text-muted-foreground">NO INCOME ENTRIES YET</div>
+            <div className="mt-2 text-sm text-muted-foreground">
+              Manually-recorded income will show up here once you save one.
+            </div>
+          </div>
+        ) : (
+          <div className="divide-y divide-border/70">
+            {paginate(results, page).map((r) => (
+              <div
+                key={r.recordId}
+                onClick={() => setEditing(r)}
+                className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-5 py-4 cursor-pointer hover:bg-muted/40 transition"
+              >
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{r.source || r.purpose || "—"}</div>
+                  <div className="text-[11px] text-muted-foreground mono mt-0.5 truncate">
+                    {r.recordDate.slice(0, 10)}
+                    {r.purpose && r.source ? ` · ${r.purpose}` : ""}
+                    {r.paymentMethod ? ` · via ${r.paymentMethod}` : ""}
+                  </div>
+                </div>
+                <div className="mono font-medium text-emerald">+{formatPHP(r.amount)}</div>
+                <Pencil className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {!loading && results.length > 0 && <Pagination page={page} totalItems={results.length} onPageChange={setPage} />}
+
+      {editing && (
+        <EditIncomeModal
+          record={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            load();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function EditIncomeModal({
+  record,
+  onClose,
+  onSaved,
+}: {
+  record: FundRecordDto;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [date, setDate] = useState(record.recordDate.slice(0, 10));
+  const [amount, setAmount] = useState(String(record.amount));
+  const [source, setSource] = useState(record.source ?? "");
+  const [purpose, setPurpose] = useState(record.purpose ?? "");
+  const [paymentMethod, setPaymentMethod] = useState(record.paymentMethod ?? "");
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amt = parseFloat(amount) || 0;
+    if (!date || !amt || amt <= 0 || !source.trim()) return toast.error("Please complete all required fields.");
+    setSubmitting(true);
+    try {
+      await api.updateRecord(record.recordId, {
+        recordDate: date,
+        amount: amt,
+        source: source.trim(),
+        purpose: purpose.trim() || undefined,
+        paymentMethod: paymentMethod || undefined,
+        notes: record.notes ?? undefined,
+      });
+      toast.success("Income updated");
+      onSaved();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update this income entry");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-foreground/30 backdrop-blur-sm" onClick={onClose}>
+      <form
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={submit}
+        className="surface-lift max-w-2xl w-full p-8 md:p-10 space-y-8 animate-scale-in max-h-[90vh] overflow-y-auto"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="eyebrow">Edit income</div>
+            <h3 className="display text-3xl md:text-4xl mt-2">Correct the details.</h3>
+          </div>
+          <button type="button" onClick={onClose} className="p-1.5 rounded-md hover:bg-muted transition shrink-0">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Same two sections as the Record Income form, so editing looks
+            and behaves exactly like creating one. */}
+        <Section num="01" title="Transaction" hint="When and how much.">
+          <div className="grid md:grid-cols-2 gap-x-8 gap-y-2">
+            <DatePicker label="Date" value={date} onChange={setDate} />
+            <FloatField label="Amount (PHP)" value={amount}>
+              <input type="number" step="0.01" min="0" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </FloatField>
+          </div>
+        </Section>
+
+        <div className="hairline-b" />
+
+        <Section num="02" title="Attribution" hint="Where the money came from, why, and how it was paid.">
+          <div className="space-y-2">
+            <FloatField label="Source of income" value={source}>
+              <input value={source} onChange={(e) => setSource(e.target.value)} />
+            </FloatField>
+            <FloatField label="Purpose" value={purpose}>
+              <input value={purpose} onChange={(e) => setPurpose(e.target.value)} maxLength={120} />
+            </FloatField>
+            <SelectPicker
+              label="Payment method (optional)"
+              value={paymentMethod}
+              placeholder="Not specified"
+              options={[{ value: "", label: "Not specified" }, ...PAYMENT_METHODS.map((m) => ({ value: m, label: m }))]}
+              onChange={setPaymentMethod}
+            />
+          </div>
+        </Section>
+
+        <div className="flex items-center justify-between pt-4 hairline-t -mx-8 md:-mx-10 px-8 md:px-10 pt-6">
+          <button type="button" onClick={onClose} className="btn btn-ghost">
+            Cancel
+          </button>
+          <button type="submit" disabled={submitting} className="btn btn-primary">
+            {submitting ? "Saving…" : "Save changes"}
           </button>
         </div>
       </form>
