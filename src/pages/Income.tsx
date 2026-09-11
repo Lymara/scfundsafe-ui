@@ -13,7 +13,8 @@ import {
 } from "@/lib/api";
 import { TrendingUp, ArrowRight, ArrowLeft, Wallet, Plus, X, Search, CheckCircle2, CircleDot, CircleDashed, Calendar, Pencil, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
-import { cn, toTitleCase } from "@/lib/utils";
+import { cn, toTitleCase, isMeaningfulPurpose } from "@/lib/utils";
+import { emitRecordsChanged } from "@/lib/events";
 import { SelectPicker } from "@/components/select-picker";
 import { DatePicker } from "@/components/date-picker";
 import { ReferenceNumberField } from "@/components/reference-field";
@@ -71,6 +72,9 @@ function IncomeForm() {
     if (!date || !amt || amt <= 0 || !source.trim()) {
       return toast.error("Please complete all required fields.");
     }
+    if (purpose.trim() && !isMeaningfulPurpose(purpose)) {
+      return toast.error("Purpose needs to actually describe the transaction, not just a placeholder like \".\"");
+    }
     if (paymentMethod === "Bank Transfer" && !bankName.trim()) return toast.error("Specify the bank");
     if (paymentMethod && paymentMethod !== "Cash" && !reference.trim()) {
       return toast.error("Enter a reference number for this payment method");
@@ -101,6 +105,7 @@ function IncomeForm() {
         }
       }
       toast.success(photoAttached ? "Income recorded — photo attached" : "Income recorded successfully");
+      emitRecordsChanged();
       navigate("/records");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to record income");
@@ -352,6 +357,9 @@ function EditIncomeModal({
     e.preventDefault();
     const amt = parseFloat(amount) || 0;
     if (!date || !amt || amt <= 0 || !source.trim()) return toast.error("Please complete all required fields.");
+    if (purpose.trim() && !isMeaningfulPurpose(purpose)) {
+      return toast.error("Purpose needs to actually describe the transaction, not just a placeholder like \".\"");
+    }
     setSubmitting(true);
     try {
       await api.updateRecord(record.recordId, {
@@ -363,6 +371,7 @@ function EditIncomeModal({
         notes: record.notes ?? undefined,
       });
       toast.success("Income updated");
+      emitRecordsChanged();
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update this income entry");

@@ -37,7 +37,8 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn, toTitleCase } from "@/lib/utils";
+import { cn, toTitleCase, formatStudentName, parseStudentName, studentInitials } from "@/lib/utils";
+import { emitRecordsChanged } from "@/lib/events";
 
 export default function StudentsPage() {
   return (
@@ -500,12 +501,7 @@ function RosterTable({
             ) : (
               pageItems.map((s, i) => {
                 const displayName = toTitleCase(s.fullName);
-                const initials = displayName
-                  .split(" ")
-                  .map((p) => p[0])
-                  .slice(0, 2)
-                  .join("")
-                  .toUpperCase();
+                const initials = studentInitials(s.fullName);
                 return (
                   <tr key={s.studentId} className="hover:bg-muted/40 transition group">
                     <td className="px-5 py-4 mono text-[10px] text-muted-foreground">
@@ -786,6 +782,7 @@ function StudentDetailModal({
       api.getStudentFees(student.studentId).then(setFees).catch(() => {});
       setEditMode(false);
       toast.success(receiptPayment.isRefund ? "Refund updated" : "Payment updated");
+      emitRecordsChanged();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update this entry");
     } finally {
@@ -1258,6 +1255,7 @@ function RecordPaymentModal({
         }
       }
       toast.success(photoAttached ? "Payment recorded — photo attached" : "Payment recorded");
+      emitRecordsChanged();
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to record payment");
@@ -1385,21 +1383,26 @@ function EditStudentModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [fullName, setFullName] = useState(student.fullName);
+  const parsed = useMemo(() => parseStudentName(student.fullName), [student.fullName]);
+  const [lastName, setLastName] = useState(parsed.lastName);
+  const [firstName, setFirstName] = useState(parsed.firstName);
+  const [middleInitial, setMiddleInitial] = useState(parsed.middleInitial);
   const [yearLevel, setYearLevel] = useState<YearLevel>(student.yearLevel);
   const [section, setSection] = useState(student.section ?? "");
   const [email, setEmail] = useState(student.email ?? "");
   const [isActive, setIsActive] = useState(student.isActive);
   const [submitting, setSubmitting] = useState(false);
 
+  const preview = formatStudentName(lastName, firstName, middleInitial);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!fullName.trim()) return toast.error("Full name is required");
+    if (!lastName.trim() || !firstName.trim()) return toast.error("Last name and first name are required");
 
     setSubmitting(true);
     try {
       await api.updateStudent(student.studentId, {
-        fullName: fullName.trim(),
+        fullName: preview,
         yearLevel,
         section: section.trim() || undefined,
         email: email.trim() || undefined,
@@ -1416,24 +1419,55 @@ function EditStudentModal({
 
   return (
     <ModalShell title="Edit student" subtitle={`${student.studentNumber} · currently Year ${student.yearLevel}`} onClose={onClose}>
-      <form onSubmit={submit} className="space-y-2">
-        <FloatField label="Full name" value={fullName}>
-          <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
-        </FloatField>
+      <form onSubmit={submit} className="space-y-2" autoComplete="off">
         <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          <FloatField label="Last name" value={lastName}>
+            <input
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+                            autoComplete="new-password"
+              name="student-last-name"
+            />
+          </FloatField>
+          <FloatField label="First name" value={firstName}>
+            <input
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+                            autoComplete="new-password"
+              name="student-first-name"
+            />
+          </FloatField>
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          <FloatField label="Middle initial (optional)" value={middleInitial}>
+            <input
+              value={middleInitial}
+              onChange={(e) => setMiddleInitial(e.target.value.slice(0, 1))}
+                            maxLength={1}
+              autoComplete="new-password"
+              name="student-middle-initial"
+            />
+          </FloatField>
           <SelectPicker
             label="Year level"
             value={String(yearLevel)}
             options={YEAR_LEVEL_OPTIONS}
             onChange={(v) => setYearLevel(Number(v) as YearLevel)}
           />
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
           <FloatField label="Section (optional)" value={section}>
             <input value={section} onChange={(e) => setSection(e.target.value)} placeholder="BSIT-3A" />
           </FloatField>
+          <FloatField label="Email (optional)" value={email}>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </FloatField>
         </div>
-        <FloatField label="Email (optional)" value={email}>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        </FloatField>
+        {lastName.trim() && firstName.trim() && (
+          <p className="text-[11px] text-muted-foreground pt-1">
+            Will appear as <span className="text-foreground">{toTitleCase(preview)}</span>
+          </p>
+        )}
         <label className="flex items-center gap-2 pt-3 text-sm cursor-pointer">
           <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="h-4 w-4" />
           Active (uncheck to mark this student inactive without deleting their history)
@@ -1453,21 +1487,26 @@ function EditStudentModal({
 
 function AddStudentModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [studentNumber, setStudentNumber] = useState("");
-  const [fullName, setFullName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [middleInitial, setMiddleInitial] = useState("");
   const [yearLevel, setYearLevel] = useState<YearLevel>(1);
   const [section, setSection] = useState("");
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const preview = formatStudentName(lastName, firstName, middleInitial);
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!studentNumber.trim() || !fullName.trim()) return toast.error("Student number and name are required");
+    if (!studentNumber.trim() || !lastName.trim() || !firstName.trim())
+      return toast.error("Student number, last name, and first name are required");
 
     setSubmitting(true);
     try {
       await api.createStudent({
         studentNumber: studentNumber.trim(),
-        fullName: fullName.trim(),
+        fullName: preview,
         yearLevel,
         section: section.trim() || undefined,
         email: email.trim() || undefined,
@@ -1483,27 +1522,58 @@ function AddStudentModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
 
   return (
     <ModalShell title="Add student" subtitle="Enroll one student and set up their fee records." onClose={onClose}>
-      <form onSubmit={submit} className="space-y-2">
+      <form onSubmit={submit} className="space-y-2" autoComplete="off">
         <FloatField label="Student number" value={studentNumber}>
           <input value={studentNumber} onChange={(e) => setStudentNumber(e.target.value)} placeholder="2026-0123" />
         </FloatField>
-        <FloatField label="Full name" value={fullName}>
-          <input value={fullName} onChange={(e) => setFullName(e.target.value)} />
-        </FloatField>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          <FloatField label="Last name" value={lastName}>
+            <input
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+                            autoComplete="new-password"
+              name="student-last-name"
+            />
+          </FloatField>
+          <FloatField label="First name" value={firstName}>
+            <input
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+                            autoComplete="new-password"
+              name="student-first-name"
+            />
+          </FloatField>
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
+          <FloatField label="Middle initial (optional)" value={middleInitial}>
+            <input
+              value={middleInitial}
+              onChange={(e) => setMiddleInitial(e.target.value.slice(0, 1))}
+                            maxLength={1}
+              autoComplete="new-password"
+              name="student-middle-initial"
+            />
+          </FloatField>
           <SelectPicker
             label="Year level"
             value={String(yearLevel)}
             options={YEAR_LEVEL_OPTIONS}
             onChange={(v) => setYearLevel(Number(v) as YearLevel)}
           />
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2">
           <FloatField label="Section (optional)" value={section}>
             <input value={section} onChange={(e) => setSection(e.target.value)} placeholder="BSIT-3A" />
           </FloatField>
+          <FloatField label="Email (optional)" value={email}>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </FloatField>
         </div>
-        <FloatField label="Email (optional)" value={email}>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} />
-        </FloatField>
+        {lastName.trim() && firstName.trim() && (
+          <p className="text-[11px] text-muted-foreground pt-1">
+            Will appear as <span className="text-foreground">{toTitleCase(preview)}</span>
+          </p>
+        )}
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" onClick={onClose} className="btn btn-ghost">
             Cancel

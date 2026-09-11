@@ -3,6 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { useAuth, formatPHP } from "@/lib/auth-context";
 import { api, type BalanceDto, type FundRecordDto, type StudentDto, type YearLevel } from "@/lib/api";
+import { onRecordsChanged } from "@/lib/events";
+import { smoothPath } from "@/lib/utils";
 import {
   TrendingUp,
   TrendingDown,
@@ -57,23 +59,34 @@ function Dashboard() {
       }
     }
     load();
+    // Re-run the same fetch whenever an income/expense is recorded anywhere
+    // in the app (see src/lib/events.ts) - this is what makes the Cash Flow
+    // chart update immediately, rather than only on the next full page load.
+    const unsubscribe = onRecordsChanged(load);
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, []);
 
-  const monthly = useMemo(() => {
-    const map = new Map<string, { month: string; income: number; expense: number }>();
+  // Grouped by calendar day (not month) so the Cash Flow chart actually has
+  // enough points to show a real trend - almost all activity for a class
+  // council happens within a single month or two, which used to collapse
+  // this to one flat "month" bucket with nothing to curve between. Daily
+  // buckets give smoothPath() real variation to work with, same as it
+  // already handles fine once there's more than a couple of points.
+  const cashFlowSeries = useMemo(() => {
+    const map = new Map<string, { date: string; income: number; expense: number }>();
     [...allRecords]
       .sort((a, b) => (a.recordDate < b.recordDate ? -1 : 1))
       .forEach((r) => {
-        const key = r.recordDate.slice(0, 7);
-        const row = map.get(key) ?? { month: key, income: 0, expense: 0 };
+        const key = r.recordDate.slice(0, 10);
+        const row = map.get(key) ?? { date: key, income: 0, expense: 0 };
         if (r.recordType === "Income") row.income += r.amount;
         else row.expense += r.amount;
         map.set(key, row);
       });
-    return [...map.values()].slice(-8);
+    return [...map.values()].slice(-14);
   }, [allRecords]);
 
   const perYear = useMemo(
@@ -182,13 +195,13 @@ function Dashboard() {
       </section>
 
       {/* Charts */}
-      {(monthly.length > 0 || students.length > 0) && (
+      {(cashFlowSeries.length > 0 || students.length > 0) && (
         <section className="grid lg:grid-cols-2 gap-6">
           <div className="surface p-6">
             <div className="eyebrow">Cash flow</div>
             <h2 className="display text-xl mt-1 mb-4">Income vs expense</h2>
-            {monthly.length > 0 ? (
-              <AreaChart rows={monthly} />
+            {cashFlowSeries.length > 0 ? (
+              <AreaChart rows={cashFlowSeries} />
             ) : (
               <div className="h-[220px] grid place-items-center text-xs text-muted-foreground">No records yet.</div>
             )}
@@ -322,27 +335,44 @@ function StatCard({
 
 /* ---------------- Charts ---------------- */
 
-function AreaChart({ rows }: { rows: { month: string; income: number; expense: number }[] }) {
+function AreaChart({ rows }: { rows: { date: string; income: number; expense: number }[] }) {
   const width = 560;
   const height = 220;
   const padding = { top: 10, right: 10, bottom: 24, left: 36 };
   const chartW = width - padding.left - padding.right;
   const chartH = height - padding.top - padding.bottom;
   const maxVal = Math.max(1, ...rows.map((r) => Math.max(r.income, r.expense)));
-  const stepX = rows.length > 1 ? chartW / (rows.length - 1) : 0;
   const scaleY = (v: number) => chartH - (v / maxVal) * chartH;
+  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(maxVal * f));
+
+  // A line needs at least two points to have anything to draw between. With
+  // only one day of data, plot that same value at both the start and end
+  // of the chart - a flat horizontal line across the full width - instead
+  // of a "line" that's mathematically zero-width and invisible. The x-axis
+  // label still only prints once, centered, since it's genuinely one day.
+  const plotRows = rows.length > 1 ? rows : rows.length === 1 ? [rows[0], rows[0]] : [];
+  const stepX = plotRows.length > 1 ? chartW / (plotRows.length - 1) : 0;
+  const xFor = (i: number) => (rows.length === 1 ? padding.left + chartW / 2 : padding.left + stepX * i);
 
   const pointsFor = (key: "income" | "expense") =>
-    rows.map((r, i) => `${padding.left + stepX * i},${padding.top + scaleY(r[key])}`).join(" ");
+    plotRows.map((r, i) => ({ x: padding.left + stepX * i, y: padding.top + scaleY(r[key]) }));
+
+  const lineFor = (key: "income" | "expense") => smoothPath(pointsFor(key));
 
   const areaFor = (key: "income" | "expense") => {
-    const pts = rows.map((r, i) => `${padding.left + stepX * i},${padding.top + scaleY(r[key])}`);
-    const first = `${padding.left},${padding.top + chartH}`;
-    const last = `${padding.left + stepX * (rows.length - 1)},${padding.top + chartH}`;
-    return `${first} ${pts.join(" ")} ${last}`;
+    const curve = smoothPath(pointsFor(key));
+    const bottomRight = `L ${padding.left + chartW},${padding.top + chartH}`;
+    const bottomLeft = `L ${padding.left},${padding.top + chartH}`;
+    return `${curve} ${bottomRight} ${bottomLeft} Z`;
   };
 
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(maxVal * f));
+  const formatDay = (iso: string) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString("en-PH", { month: "short", day: "numeric" });
+
+  // With up to 14 daily points, printing every single label would crowd
+  // them into each other - thin them down to roughly 6-7 evenly spaced
+  // labels regardless of how many points are actually plotted.
+  const labelStride = Math.max(1, Math.ceil(rows.length / 7));
 
   return (
     <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-[220px]">
@@ -357,23 +387,37 @@ function AreaChart({ rows }: { rows: { month: string; income: number; expense: n
           </g>
         );
       })}
-      <polygon points={areaFor("income")} fill="var(--emerald)" opacity={0.18} />
-      <polygon points={areaFor("expense")} fill="var(--amber)" opacity={0.15} />
-      <polyline points={pointsFor("income")} fill="none" stroke="var(--emerald)" strokeWidth={2} />
-      <polyline points={pointsFor("expense")} fill="none" stroke="var(--amber)" strokeWidth={2} />
-      {rows.map((r, i) => (
-        <text
-          key={r.month}
-          x={padding.left + stepX * i}
-          y={height - 6}
-          textAnchor="middle"
-          fontSize="9"
-          fill="var(--muted-foreground)"
-          className="mono"
-        >
-          {r.month.slice(2)}
-        </text>
-      ))}
+      <path d={areaFor("income")} fill="var(--emerald)" opacity={0.18} />
+      <path d={areaFor("expense")} fill="var(--amber)" opacity={0.15} />
+      <path d={lineFor("income")} fill="none" stroke="var(--emerald)" strokeWidth={2} />
+      <path d={lineFor("expense")} fill="none" stroke="var(--amber)" strokeWidth={2} />
+      {rows.length === 1 && (
+        <>
+          <circle cx={xFor(0)} cy={padding.top + scaleY(rows[0].income)} r={3} fill="var(--emerald)" />
+          <circle cx={xFor(0)} cy={padding.top + scaleY(rows[0].expense)} r={3} fill="var(--amber)" />
+        </>
+      )}
+      {rows.map(
+        (r, i) =>
+          (i % labelStride === 0 || i === rows.length - 1) && (
+            <text
+              key={r.date}
+              x={xFor(i)}
+              y={height - 6}
+              // The first and last labels sit right at the chart's edges -
+              // centering their text there would push half of it past the
+              // SVG boundary and get silently clipped (that's what was
+              // turning "Sep 11" into "Sep 1"). Anchoring them inward
+              // instead keeps every character on-screen.
+              textAnchor={i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle"}
+              fontSize="9"
+              fill="var(--muted-foreground)"
+              className="mono"
+            >
+              {formatDay(r.date)}
+            </text>
+          ),
+      )}
       <g transform={`translate(${width - 150}, 4)`} className="mono" fontSize="10">
         <rect width="9" height="9" rx="2" fill="var(--emerald)" />
         <text x="14" y="8" fill="var(--muted-foreground)">

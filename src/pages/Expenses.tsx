@@ -29,7 +29,8 @@ import {
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
-import { cn, toTitleCase } from "@/lib/utils";
+import { cn, toTitleCase, isMeaningfulPurpose } from "@/lib/utils";
+import { emitRecordsChanged } from "@/lib/events";
 import { SelectPicker } from "@/components/select-picker";
 import { DatePicker } from "@/components/date-picker";
 import { ReferenceNumberField } from "@/components/reference-field";
@@ -103,6 +104,9 @@ function ExpenseForm() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!date || !amt || amt <= 0 || !purpose.trim()) return toast.error("Please complete all required fields.");
+    if (!isMeaningfulPurpose(purpose)) {
+      return toast.error("Purpose needs to actually describe the expense, not just a placeholder like \".\"");
+    }
     if (overBalance) {
       const proceed = confirm(
         `This expense (${formatPHP(amt)}) exceeds the balance (${formatPHP(currentBalance)}). Save anyway?`,
@@ -125,6 +129,7 @@ function ExpenseForm() {
         }
       }
       toast.success(`Expense recorded successfully${attachNote}`);
+      emitRecordsChanged();
       navigate("/records");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to record expense");
@@ -662,6 +667,7 @@ function RefundFormModal({
         }
       }
       toast.success(photoAttached ? "Refund recorded — photo attached" : "Refund recorded");
+      emitRecordsChanged();
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to record refund");
@@ -989,6 +995,9 @@ function EditExpenseModal({
     e.preventDefault();
     const amt = parseFloat(amount) || 0;
     if (!date || !amt || amt <= 0 || !purpose.trim()) return toast.error("Please complete all required fields.");
+    if (!isMeaningfulPurpose(purpose)) {
+      return toast.error("Purpose needs to actually describe the expense, not just a placeholder like \".\"");
+    }
     setSubmitting(true);
     try {
       await api.updateRecord(record.recordId, {
@@ -999,6 +1008,7 @@ function EditExpenseModal({
         notes: record.notes ?? undefined,
       });
       toast.success("Expense updated");
+      emitRecordsChanged();
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update expense");
@@ -1193,6 +1203,7 @@ function EditRefundModal({
         reference: composedReference,
       });
       toast.success("Refund updated");
+      emitRecordsChanged();
       onSaved();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update this refund");
