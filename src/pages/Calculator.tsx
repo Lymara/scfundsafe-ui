@@ -256,12 +256,13 @@ function FinesCalculator() {
     const start = new Date(a + "T00:00:00");
     const end = new Date(b + "T00:00:00");
     const diff = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return diff;
+    return Math.max(0, diff);
   };
 
   const eventDays = selectedFee ? daysBetween(selectedFee.dueDate.slice(0, 10), calculateUntil) : 0;
   const eventFine = selectedFee && eventDays > 0 ? eventDays * (parseFloat(finePerDayEvent) || 0) : 0;
 
+  const invalidRange = Boolean(startDate && endDate && startDate > endDate);
   const customDays = daysBetween(startDate, endDate);
   const customFine = customDays > 0 ? customDays * (parseFloat(finePerDayCustom) || 0) : 0;
 
@@ -338,11 +339,17 @@ function FinesCalculator() {
             <DatePicker label="Start date" value={startDate} onChange={setStartDate} />
             <DatePicker label="End date" value={endDate} onChange={setEndDate} />
           </div>
+          {invalidRange && (
+            <p className="text-xs text-destructive flex items-center gap-1.5">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              Start date can't be after end date.
+            </p>
+          )}
           <FloatField label="Fine per day (PHP)" value={finePerDayCustom}>
             <input type="number" step="0.01" min="0" value={finePerDayCustom} onChange={(e) => setFinePerDayCustom(e.target.value)} />
           </FloatField>
 
-          {startDate && endDate && (
+          {startDate && endDate && !invalidRange && (
             <ResultCard
               days={customDays}
               finePerDay={parseFloat(finePerDayCustom) || 0}

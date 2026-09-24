@@ -23,12 +23,11 @@ import { SectionNav, type SectionNavItem } from "@/components/section-nav";
 
 export default function IncomePage() {
   const { currentUser } = useAuth();
-  const isAdmin = currentUser?.role === "Admin";
   const canManage = currentUser?.role === "Treasurer";
-  const [tab, setTab] = useState<"income" | "fees" | "manage">(isAdmin ? "fees" : "income");
+  const [tab, setTab] = useState<"income" | "fees" | "manage">("income");
 
   const navItems: SectionNavItem<"income" | "fees" | "manage">[] = [
-    ...(isAdmin ? [] : [{ key: "income" as const, label: "Record Income", icon: TrendingUp }]),
+    { key: "income", label: "Record Income", icon: TrendingUp },
     { key: "fees", label: "Fees & Sources", icon: Wallet },
     ...(canManage ? [{ key: "manage" as const, label: "Edit Income", icon: Pencil }] : []),
   ];
@@ -37,7 +36,7 @@ export default function IncomePage() {
     <AppLayout>
       <div className="space-y-8">
         <SectionNav items={navItems} active={tab} onChange={setTab} />
-        {tab === "income" && !isAdmin ? (
+        {tab === "income" ? (
           <IncomeForm />
         ) : tab === "manage" && canManage ? (
           <ManageIncomeView />

@@ -39,6 +39,7 @@ import {
 import { toast } from "sonner";
 import { cn, toTitleCase, formatStudentName, parseStudentName, studentInitials } from "@/lib/utils";
 import { emitRecordsChanged } from "@/lib/events";
+import { studentsToCsv, downloadCsv } from "@/lib/export-csv";
 
 export default function StudentsPage() {
   return (
@@ -108,6 +109,15 @@ function StudentsView() {
     load();
   };
 
+  // Exports exactly the rows currently listed in the table (year tab + status + last search).
+  const handleExportCsv = () => {
+    if (students.length === 0) return toast.error("No students to export.");
+    const parts = ["student-dues-roster", yearTab === "all" ? null : `year-${yearTab}`, status ? status.toLowerCase() : null];
+    const filename = `${parts.filter(Boolean).join("-")}-${new Date().toISOString().slice(0, 10)}.csv`;
+    downloadCsv(filename, studentsToCsv(students));
+    toast.success(`Exported ${students.length} student${students.length === 1 ? "" : "s"}.`);
+  };
+
   const yearTabs: { id: YearTab; label: string }[] = [
     { id: "all", label: "All Years" },
     { id: 1, label: "1st Year" },
@@ -129,6 +139,9 @@ function StudentsView() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={handleExportCsv} disabled={loading || students.length === 0} className="btn btn-ghost disabled:opacity-50">
+            <Download className="h-3.5 w-3.5" /> Export CSV
+          </button>
           {canManageStudents && (
             <>
               <button onClick={() => setImporting(true)} className="btn btn-ghost">

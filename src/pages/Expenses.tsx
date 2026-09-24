@@ -39,20 +39,6 @@ import { SectionNav, type SectionNavItem } from "@/components/section-nav";
 
 export default function ExpensePage() {
   const { currentUser } = useAuth();
-  if (currentUser?.role === "Admin") {
-    return (
-      <AppLayout>
-        <div className="max-w-md text-center py-24 mx-auto">
-          <div className="eyebrow">Restricted</div>
-          <h1 className="display text-3xl mt-2">Not available for admins</h1>
-          <p className="text-muted-foreground text-sm mt-3">
-            Administrators manage accounts and audit logs — recording transactions is reserved for the treasurer.
-          </p>
-        </div>
-      </AppLayout>
-    );
-  }
-
   const canRefund = currentUser?.role === "Treasurer";
   const canManage = currentUser?.role === "Treasurer";
   const [tab, setTab] = useState<"expense" | "refunds" | "manage">("expense");
