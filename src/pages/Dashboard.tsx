@@ -36,6 +36,11 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const today = new Date().toLocaleDateString("en-PH", { weekday: "long", month: "long", day: "numeric" });
   const canRecord = currentUser?.role === "Treasurer";
+  // Admin accounts use a full title (e.g. "System Administrator"), so show the whole name;
+  // everyone else is greeted by first name.
+  const fullName = currentUser?.fullName?.trim() ?? "";
+  const greetingName =
+    currentUser?.role === "Admin" ? fullName : fullName.split(/\s+/)[0];
 
   useEffect(() => {
     let cancelled = false;
@@ -121,7 +126,7 @@ function Dashboard() {
           <div className="text-xs text-muted-foreground mono">{today}</div>
         </div>
         <h1 className="display text-4xl md:text-6xl">
-          Good day, <span className="gradient-text">{currentUser?.fullName.split(" ")[0]}</span>.
+          Good day, <span className="gradient-text">{greetingName}</span>.
         </h1>
         <p className="text-muted-foreground mt-3 max-w-lg text-sm leading-relaxed">
           Here's the state of the IT department council fund — collections, expenses, and every student's standing.
