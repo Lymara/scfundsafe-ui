@@ -372,10 +372,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   }
 
   if (!res.ok) {
-    const message =
-      (body as { message?: string; title?: string })?.message ||
-      (body as { message?: string; title?: string })?.title ||
-      `Request failed (${res.status})`;
+    const b = body as { message?: string; title?: string; errors?: Record<string, string[] | string> } | null;
+    // ASP.NET validation responses put the useful details in `errors`
+    // (e.g. { Email: ["The Email field is required."] }) and only a generic `title`.
+    const validationDetails = b?.errors
+      ? Object.values(b.errors)
+          .flat()
+          .filter((m): m is string => typeof m === "string" && m.length > 0)
+          .join(" ")
+      : "";
+    const message = b?.message || validationDetails || b?.title || `Request failed (${res.status})`;
     throw new ApiError(message, res.status);
   }
 

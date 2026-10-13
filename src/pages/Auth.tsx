@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { PwInput } from "@/components/pw-input";
-import { ArrowRight, ShieldCheck } from "lucide-react";
+import { AlertCircle, ArrowRight, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import bitsLogo from "@/assets/bits-logo.png";
 
@@ -12,6 +12,7 @@ export default function AuthPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [errors, setErrors] = useState<{ email?: string; password?: string }>({});
 
   useEffect(() => {
     if (currentUser) navigate("/dashboard");
@@ -19,6 +20,18 @@ export default function AuthPage() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // Check the fields here so the user sees exactly what's missing,
+    // instead of the API's generic "One or more validation errors occurred."
+    const nextErrors: { email?: string; password?: string } = {};
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) nextErrors.email = "Email is required";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail))
+      nextErrors.email = "Enter a valid email address";
+    if (!password) nextErrors.password = "Password is required";
+    setErrors(nextErrors);
+    if (nextErrors.email || nextErrors.password) return;
+
     setSubmitting(true);
     try {
       const r = await login(email.trim(), password);
@@ -107,12 +120,29 @@ export default function AuthPage() {
                 Sign in to manage the council funds. Accounts are issued by the system administrator.
               </p>
 
-              <form onSubmit={submit} className="mt-8 space-y-2">
-                <FloatField label="Email" value={email}>
-                  <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" />
+              <form onSubmit={submit} noValidate className="mt-8 space-y-4">
+                <FloatField label="Email" value={email} error={errors.email}>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => {
+                      setEmail(e.target.value);
+                      if (errors.email) setErrors((prev) => ({ ...prev, email: undefined }));
+                    }}
+                    autoComplete="username"
+                    aria-invalid={!!errors.email}
+                  />
                 </FloatField>
-                <FloatField label="Password" value={password}>
-                  <PwInput value={password} onChange={setPassword} autoComplete="current-password" hideButtonWhenEmpty />
+                <FloatField label="Password" value={password} error={errors.password}>
+                  <PwInput
+                    value={password}
+                    onChange={(v) => {
+                      setPassword(v);
+                      if (errors.password) setErrors((prev) => ({ ...prev, password: undefined }));
+                    }}
+                    autoComplete="current-password"
+                    hideButtonWhenEmpty
+                  />
                 </FloatField>
 
                 <button type="submit" disabled={submitting} className="btn btn-primary w-full mt-8">
@@ -132,11 +162,42 @@ export default function AuthPage() {
   );
 }
 
-function FloatField({ label, value, children }: { label: string; value: string; children: React.ReactNode }) {
+function FloatField({
+  label,
+  value,
+  error,
+  children,
+}: {
+  label: string;
+  value: string;
+  error?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <label className={"field" + (value ? " is-filled" : "")}>
-      {children}
-      <span className="field-label">{label}</span>
-    </label>
+    <div>
+      <label className={"field" + (value ? " is-filled" : "") + (error ? " has-error" : "")}>
+        {children}
+        <span className="field-label">{label}</span>
+      </label>
+      {error && (
+        <p
+          role="alert"
+          className="field-error"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "0.35rem",
+            marginTop: "0.4rem",
+            fontSize: "0.72rem",
+            lineHeight: 1.2,
+            fontWeight: 500,
+            color: "var(--destructive)",
+          }}
+        >
+          <AlertCircle style={{ width: "0.8rem", height: "0.8rem", flexShrink: 0 }} />
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

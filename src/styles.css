@@ -247,6 +247,7 @@
 }
 .field textarea { resize: none; min-height: 4.5rem; }
 
+
 /* Chrome/Edge forces a white background (plus black text) on any field it
    recognizes for autofill - typically password fields, but also email/
    username fields on a form it thinks is a login. The long transition delay
@@ -561,4 +562,17 @@ select:autofill {
   th, td { overflow-wrap: break-word; word-break: break-word; }
   tr, .print-avoid-break { break-inside: avoid; }
   thead { display: table-header-group; }
+}
+
+/* --- inline validation (kept last so it overrides the filled/focus colours) --- */
+.field.has-error input,
+.field.has-error textarea,
+.field.has-error select,
+.field.has-error:focus-within input {
+  border-bottom-color: var(--destructive) !important;
+}
+.field.has-error > .field-label,
+.field.has-error.is-filled > .field-label,
+.field.has-error:focus-within > .field-label {
+  color: var(--destructive);
 }
