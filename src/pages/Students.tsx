@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AppLayout } from "@/components/app-layout";
 import { useAuth, formatPHP } from "@/lib/auth-context";
 import { SelectPicker } from "@/components/select-picker";
@@ -32,6 +33,7 @@ import {
   CircleDot,
   Pencil,
   Trash2,
+  AlertTriangle,
   ImageOff,
   ArrowLeft,
   Loader2,
@@ -465,17 +467,19 @@ function RosterTable({
   onPageChange: (page: number) => void;
 }) {
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<StudentDto | null>(null);
   const pageItems = paginate(students, page);
 
   const handleDelete = async (s: StudentDto) => {
-    if (!confirm(`Remove ${toTitleCase(s.fullName)} from the roster? This only works if they have no recorded payments yet.`)) return;
     setDeletingId(s.studentId);
     try {
       await api.deleteStudent(s.studentId);
       toast.success("Student removed");
+      setPendingDelete(null);
       onDeleted();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to remove student");
+      setPendingDelete(null);
     } finally {
       setDeletingId(null);
     }
@@ -585,7 +589,7 @@ function RosterTable({
                               <Pencil className="h-3.5 w-3.5" />
                             </button>
                             <button
-                              onClick={() => handleDelete(s)}
+                              onClick={() => setPendingDelete(s)}
                               disabled={deletingId === s.studentId}
                               className="p-2 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition disabled:opacity-40"
                               title="Remove student"
@@ -604,7 +608,91 @@ function RosterTable({
         </table>
       </div>
       <Pagination page={page} totalItems={students.length} onPageChange={onPageChange} />
+      {pendingDelete && (
+        <ConfirmDeleteStudentModal
+          student={pendingDelete}
+          busy={deletingId === pendingDelete.studentId}
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => handleDelete(pendingDelete)}
+        />
+      )}
     </div>
+  );
+}
+
+function ConfirmDeleteStudentModal({
+  student,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  student: StudentDto;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const name = toTitleCase(student.fullName);
+  const hasPayments = student.totalPaid > 0 || student.paidFeeCount > 0;
+
+  // Close on Escape (unless the delete request is in flight).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !busy) onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [busy, onCancel]);
+
+  // Rendered into <body> via a portal: the roster table sits inside a container
+  // with overflow/backdrop styles, which would otherwise trap a fixed overlay.
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] grid place-items-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
+      onClick={busy ? undefined : onCancel}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="confirm-delete-title"
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="surface-lift w-full max-w-sm p-7 text-center animate-scale-in"
+      >
+        <div className="mx-auto h-12 w-12 grid place-items-center rounded-full bg-destructive/10 ring-1 ring-destructive/30 text-destructive">
+          <Trash2 className="h-5 w-5" />
+        </div>
+
+        <h3 id="confirm-delete-title" className="display text-xl mt-5">
+          Remove student?
+        </h3>
+        <p className="text-sm text-muted-foreground mt-2 leading-relaxed">
+          <span className="text-foreground font-semibold">{name}</span> will be removed from the roster. This
+          can't be undone.
+        </p>
+        <p className="mono text-[11px] text-muted-foreground/80 mt-2">
+          {student.studentNumber} · Year {student.yearLevel}
+          {student.section ? ` · ${student.section}` : ""}
+        </p>
+
+        {hasPayments && (
+          <div className="mt-5 flex items-start gap-2.5 rounded-lg px-3.5 py-3 text-left text-xs leading-relaxed bg-amber/10 ring-1 ring-amber/30 text-amber">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-px" />
+            <span>
+              This student has recorded payments ({formatPHP(student.totalPaid)}), so removal will be blocked.
+            </span>
+          </div>
+        )}
+
+        <div className="mt-7 grid grid-cols-2 gap-3">
+          <button type="button" onClick={onCancel} disabled={busy} className="btn btn-ghost w-full">
+            Cancel
+          </button>
+          <button type="button" onClick={onConfirm} disabled={busy} className="btn btn-danger w-full">
+            {busy ? "Removing…" : "Remove"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
