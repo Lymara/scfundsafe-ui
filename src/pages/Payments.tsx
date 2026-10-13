@@ -11,6 +11,9 @@ import {
 } from "@/lib/api";
 import { Receipt, Search } from "lucide-react";
 import { toast } from "sonner";
+import { SearchClearButton } from "@/components/search-clear";
+import { Highlight } from "@/components/highlight";
+import { matchesSearch } from "@/lib/search";
 import { cn, toTitleCase } from "@/lib/utils";
 import { Pagination, paginate } from "@/components/pagination";
 
@@ -60,15 +63,7 @@ function PaymentsView() {
       payments.filter((p) => {
         if (method !== "all" && p.paymentMethod !== method) return false;
         if (year !== "all" && p.yearLevel !== year) return false;
-        if (q) {
-          const s = q.toLowerCase();
-          return (
-            p.studentFullName.toLowerCase().includes(s) ||
-            p.studentNumber.toLowerCase().includes(s) ||
-            p.feeName.toLowerCase().includes(s)
-          );
-        }
-        return true;
+        return matchesSearch(q, p.studentFullName, p.studentNumber, p.feeName, p.reference);
       }),
     [payments, q, method, year],
   );
@@ -167,8 +162,9 @@ function PaymentsView() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search student, fee, reference…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <div className="flex items-center gap-3 pt-1 hairline-t flex-wrap">
           <span className="mono text-[10px] uppercase tracking-widest text-muted-foreground w-12 shrink-0">Method</span>
@@ -229,13 +225,13 @@ function PaymentsView() {
                       {new Date(r.paymentDate).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" })}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-medium">{toTitleCase(r.studentFullName)}</div>
-                      <div className="mono text-[10px] text-muted-foreground">{r.studentNumber}</div>
+                      <div className="font-medium"><Highlight text={toTitleCase(r.studentFullName)} query={q} /></div>
+                      <div className="mono text-[10px] text-muted-foreground"><Highlight text={r.studentNumber} query={q} /></div>
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">Year {r.yearLevel}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1.5">
-                        {r.feeName}
+                        <Highlight text={r.feeName} query={q} />
                         {r.isRefund && (
                           <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-destructive/10 text-destructive">
                             Refund
@@ -251,7 +247,7 @@ function PaymentsView() {
                       >
                         {r.paymentMethod}
                       </span>
-                      {r.reference && <div className="mono text-[10px] text-muted-foreground mt-1">{r.reference}</div>}
+                      {r.reference && <div className="mono text-[10px] text-muted-foreground mt-1"><Highlight text={r.reference} query={q} /></div>}
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">{r.recordedByName ?? "—"}</td>
                     <td className={cn("px-6 py-3 text-right mono", r.isRefund ? "text-destructive" : "text-emerald")}>

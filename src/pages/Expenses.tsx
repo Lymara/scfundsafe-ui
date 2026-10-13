@@ -29,6 +29,9 @@ import {
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SearchClearButton } from "@/components/search-clear";
+import { Highlight } from "@/components/highlight";
+import { matchesSearch } from "@/lib/search";
 import { cn, toTitleCase, isMeaningfulPurpose } from "@/lib/utils";
 import { emitRecordsChanged } from "@/lib/events";
 import { SelectPicker } from "@/components/select-picker";
@@ -393,9 +396,7 @@ function RefundsView() {
   }, []);
 
   const results = useMemo(() => {
-    if (!q) return fees;
-    const s = q.toLowerCase();
-    return fees.filter((f) => f.name.toLowerCase().includes(s) || f.category.toLowerCase().includes(s));
+    return fees.filter((f) => matchesSearch(q, f.name, f.category));
   }, [fees, q]);
 
   return (
@@ -418,8 +419,9 @@ function RefundsView() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search fee name or category…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <span className="mono text-[10px] text-muted-foreground pr-3">{results.length} fees</span>
       </div>
@@ -443,9 +445,9 @@ function RefundsView() {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium truncate">{f.name}</div>
+                  <div className="font-medium truncate"><Highlight text={f.name} query={q} /></div>
                   <div className="mono text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
-                    <Calendar className="h-3 w-3" /> {f.category} · due{" "}
+                    <Calendar className="h-3 w-3" /> <Highlight text={f.category} query={q} /> · due{" "}
                     {new Date(f.dueDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}
                   </div>
                 </div>
@@ -514,9 +516,7 @@ function FeeRefundModal({ fee, onClose, onRefunded }: { fee: FeeDto; onClose: ()
 
   const paidStudents = useMemo(() => {
     const rows = (statuses ?? []).filter((s) => s.amountPaid > 0);
-    if (!q) return rows;
-    const k = q.toLowerCase();
-    return rows.filter((s) => s.fullName.toLowerCase().includes(k) || s.studentNumber.toLowerCase().includes(k));
+    return rows.filter((s) => matchesSearch(q, s.fullName, s.studentNumber));
   }, [statuses, q]);
 
   useEffect(() => {
@@ -550,8 +550,9 @@ function FeeRefundModal({ fee, onClose, onRefunded }: { fee: FeeDto; onClose: ()
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search student…"
-            className="w-full bg-transparent border-b border-border/70 pl-9 pr-3 py-2 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent border-b border-border/70 pl-9 pr-9 py-2 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
 
         {statuses === null ? (
@@ -566,9 +567,9 @@ function FeeRefundModal({ fee, onClose, onRefunded }: { fee: FeeDto; onClose: ()
               {paginate(paidStudents, page).map((s) => (
                 <div key={s.studentId} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 py-3">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{toTitleCase(s.fullName)}</div>
+                    <div className="text-sm font-medium truncate"><Highlight text={toTitleCase(s.fullName)} query={q} /></div>
                     <div className="text-[11px] text-muted-foreground mono">
-                      {s.studentNumber} · Year {s.yearLevel}
+                      <Highlight text={s.studentNumber} query={q} /> · Year {s.yearLevel}
                     </div>
                   </div>
                   <div className="text-right">
@@ -785,10 +786,7 @@ function ManageExpensesView() {
     if (kind !== "all") {
       list = list.filter((r) => (kind === "refund" ? r.isStudentPayment : !r.isStudentPayment));
     }
-    if (q) {
-      const s = q.toLowerCase();
-      list = list.filter((r) => (r.purpose ?? "").toLowerCase().includes(s));
-    }
+    if (q) list = list.filter((r) => matchesSearch(q, r.purpose));
     return list;
   }, [records, q, kind]);
 
@@ -817,8 +815,9 @@ function ManageExpensesView() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search by purpose…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <span className="mono text-[10px] text-muted-foreground pr-3">{results.length} expenses</span>
       </div>
@@ -871,7 +870,7 @@ function ManageExpensesView() {
               >
                 <div className="min-w-0">
                   <div className="text-sm font-medium truncate flex items-center gap-2">
-                    <span className="truncate">{r.purpose || "—"}</span>
+                    <span className="truncate">{r.purpose ? <Highlight text={r.purpose} query={q} /> : "—"}</span>
                     {r.isStudentPayment && (
                       <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-amber/10 text-amber shrink-0">
                         Refund

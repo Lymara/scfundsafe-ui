@@ -576,3 +576,11 @@ select:autofill {
 .field.has-error:focus-within > .field-label {
   color: var(--destructive);
 }
+
+/* --- search match highlight --- */
+mark.search-hit {
+  background: oklch(0.88 0.17 95 / 0.85);
+  color: oklch(0.18 0.02 95);
+  border-radius: 2px;
+  padding: 0 1px;
+}

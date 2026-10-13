@@ -13,6 +13,9 @@ import {
 } from "@/lib/api";
 import { TrendingUp, ArrowRight, ArrowLeft, Wallet, Plus, X, Search, CheckCircle2, CircleDot, CircleDashed, Calendar, Pencil, Trash2, Check } from "lucide-react";
 import { toast } from "sonner";
+import { SearchClearButton } from "@/components/search-clear";
+import { Highlight } from "@/components/highlight";
+import { matchesSearch } from "@/lib/search";
 import { cn, toTitleCase, isMeaningfulPurpose } from "@/lib/utils";
 import { emitRecordsChanged } from "@/lib/events";
 import { SelectPicker } from "@/components/select-picker";
@@ -249,9 +252,7 @@ function ManageIncomeView() {
   }, []);
 
   const results = useMemo(() => {
-    if (!q) return records;
-    const s = q.toLowerCase();
-    return records.filter((r) => (r.source ?? "").toLowerCase().includes(s) || (r.purpose ?? "").toLowerCase().includes(s));
+    return records.filter((r) => matchesSearch(q, r.source, r.purpose));
   }, [records, q]);
 
   useEffect(() => {
@@ -279,8 +280,9 @@ function ManageIncomeView() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search by source or purpose…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <span className="mono text-[10px] text-muted-foreground pr-3">{results.length} entries</span>
       </div>
@@ -306,10 +308,12 @@ function ManageIncomeView() {
                 className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-5 py-4 cursor-pointer hover:bg-muted/40 transition"
               >
                 <div className="min-w-0">
-                  <div className="text-sm font-medium truncate">{r.source || r.purpose || "—"}</div>
+                  <div className="text-sm font-medium truncate">
+                    {r.source || r.purpose ? <Highlight text={r.source || r.purpose} query={q} /> : "—"}
+                  </div>
                   <div className="text-[11px] text-muted-foreground mono mt-0.5 truncate">
                     {r.recordDate.slice(0, 10)}
-                    {r.purpose && r.source ? ` · ${r.purpose}` : ""}
+                    {r.purpose && r.source ? <> · <Highlight text={r.purpose} query={q} /></> : ""}
                     {r.paymentMethod ? ` · via ${r.paymentMethod}` : ""}
                   </div>
                 </div>
@@ -653,9 +657,7 @@ function FeesAndSources({ canManage }: { canManage: boolean }) {
   }, []);
 
   const results = useMemo(() => {
-    if (!q) return fees;
-    const s = q.toLowerCase();
-    return fees.filter((f) => f.name.toLowerCase().includes(s) || f.category.toLowerCase().includes(s));
+    return fees.filter((f) => matchesSearch(q, f.name, f.category));
   }, [fees, q]);
 
   const totalCollected = fees.reduce((s, f) => s + f.amountCollected, 0);
@@ -699,8 +701,9 @@ function FeesAndSources({ canManage }: { canManage: boolean }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search fee name or category…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <span className="mono text-[10px] text-muted-foreground pr-3">{results.length} fees</span>
       </div>
@@ -726,9 +729,9 @@ function FeesAndSources({ canManage }: { canManage: boolean }) {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="font-medium truncate">{f.name}</div>
+                  <div className="font-medium truncate"><Highlight text={f.name} query={q} /></div>
                   <div className="mono text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5">
-                    <Calendar className="h-3 w-3" /> {f.category} · due{" "}
+                    <Calendar className="h-3 w-3" /> <Highlight text={f.category} query={q} /> · due{" "}
                     {new Date(f.dueDate).toLocaleDateString("en-PH", { month: "short", day: "numeric", year: "numeric" })}
                   </div>
                 </div>
@@ -1011,11 +1014,7 @@ function FeeStudentsModal({ fee, onClose }: { fee: FeeDto; onClose: () => void }
     if (!statuses) return [];
     return statuses.filter((s) => {
       if (filter !== "all" && s.status !== filter) return false;
-      if (q) {
-        const k = q.toLowerCase();
-        return s.fullName.toLowerCase().includes(k) || s.studentNumber.toLowerCase().includes(k);
-      }
-      return true;
+      return matchesSearch(q, s.fullName, s.studentNumber);
     });
   }, [statuses, filter, q]);
 
@@ -1051,8 +1050,9 @@ function FeeStudentsModal({ fee, onClose }: { fee: FeeDto; onClose: () => void }
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="Search student…"
-              className="w-full bg-transparent border-b border-border/70 pl-9 pr-3 py-2 text-sm outline-none placeholder:text-muted-foreground/70"
+              className="w-full bg-transparent border-b border-border/70 pl-9 pr-9 py-2 text-sm outline-none placeholder:text-muted-foreground/70"
             />
+            <SearchClearButton value={q} onClear={() => setQ("")} />
           </div>
           <div className="flex items-center gap-1">
             {(["all", "Paid", "Partial", "Unpaid"] as const).map((s) => (
@@ -1080,9 +1080,9 @@ function FeeStudentsModal({ fee, onClose }: { fee: FeeDto; onClose: () => void }
               {paginate(results, page).map((s) => (
                 <div key={s.studentId} className="grid grid-cols-[1fr_auto_auto] items-center gap-4 py-3">
                   <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{toTitleCase(s.fullName)}</div>
+                    <div className="text-sm font-medium truncate"><Highlight text={toTitleCase(s.fullName)} query={q} /></div>
                     <div className="text-[11px] text-muted-foreground mono">
-                      {s.studentNumber} · Year {s.yearLevel}
+                      <Highlight text={s.studentNumber} query={q} /> · Year {s.yearLevel}
                     </div>
                   </div>
                   <div className="text-right">

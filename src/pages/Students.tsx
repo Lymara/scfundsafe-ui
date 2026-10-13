@@ -39,6 +39,9 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SearchClearButton } from "@/components/search-clear";
+import { Highlight } from "@/components/highlight";
+import { matchesSearch } from "@/lib/search";
 import { cn, toTitleCase, formatStudentName, parseStudentName, studentInitials } from "@/lib/utils";
 import { emitRecordsChanged } from "@/lib/events";
 import { studentsToCsv, downloadCsv } from "@/lib/export-csv";
@@ -86,7 +89,6 @@ function StudentsView() {
         api.getStudents({
           yearLevel: yearTab === "all" ? "" : yearTab,
           status,
-          keyword: keyword || undefined,
         }),
         api.getStudents({}),
       ]);
@@ -105,19 +107,23 @@ function StudentsView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [yearTab, status]);
 
-  const runSearch = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Search filters the loaded roster as you type (every word must match, in any
+  // order), so clearing the box always brings the full list straight back.
+  const visibleStudents = useMemo(
+    () => students.filter((s) => matchesSearch(keyword, s.fullName, s.studentNumber, s.section, s.email)),
+    [students, keyword],
+  );
+  useEffect(() => {
     setPage(1);
-    load();
-  };
+  }, [keyword]);
 
   // Exports exactly the rows currently listed in the table (year tab + status + last search).
   const handleExportCsv = () => {
-    if (students.length === 0) return toast.error("No students to export.");
+    if (visibleStudents.length === 0) return toast.error("No students to export.");
     const parts = ["student-dues-roster", yearTab === "all" ? null : `year-${yearTab}`, status ? status.toLowerCase() : null];
     const filename = `${parts.filter(Boolean).join("-")}-${new Date().toISOString().slice(0, 10)}.csv`;
-    downloadCsv(filename, studentsToCsv(students));
-    toast.success(`Exported ${students.length} student${students.length === 1 ? "" : "s"}.`);
+    downloadCsv(filename, studentsToCsv(visibleStudents));
+    toast.success(`Exported ${visibleStudents.length} student${visibleStudents.length === 1 ? "" : "s"}.`);
   };
 
   const yearTabs: { id: YearTab; label: string }[] = [
@@ -141,7 +147,7 @@ function StudentsView() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <button onClick={handleExportCsv} disabled={loading || students.length === 0} className="btn btn-ghost disabled:opacity-50">
+          <button onClick={handleExportCsv} disabled={loading || visibleStudents.length === 0} className="btn btn-ghost disabled:opacity-50">
             <Download className="h-3.5 w-3.5" /> Export CSV
           </button>
           {canManageStudents && (
@@ -174,15 +180,16 @@ function StudentsView() {
         ))}
       </nav>
 
-      <form onSubmit={runSearch} className="surface p-2 flex flex-wrap items-center gap-1">
+      <form onSubmit={(e) => e.preventDefault()} className="surface p-2 flex flex-wrap items-center gap-1">
         <div className="relative flex-1 min-w-[220px]">
           <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             placeholder="Search name, student number, section…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={keyword} onClear={() => setKeyword("")} />
         </div>
         <div className="flex items-center gap-1 pl-2 border-l border-border/70">
           {(["", "Paid", "Partial", "Unpaid"] as (DuesStatus | "")[]).map((s) => (
@@ -199,13 +206,11 @@ function StudentsView() {
             </button>
           ))}
         </div>
-        <button type="submit" className="btn btn-ghost ml-auto">
-          <Search className="h-3.5 w-3.5" /> Search
-        </button>
       </form>
 
       <RosterTable
-        students={students}
+        students={visibleStudents}
+        query={keyword}
         loading={loading}
         canRecordPayment={canRecordPayment}
         canManageStudents={canManageStudents}
@@ -445,6 +450,7 @@ function statusPill(status: DuesStatus) {
 
 function RosterTable({
   students,
+  query,
   loading,
   canRecordPayment,
   canManageStudents,
@@ -456,6 +462,7 @@ function RosterTable({
   onPageChange,
 }: {
   students: StudentDto[];
+  query: string;
   loading: boolean;
   canRecordPayment: boolean;
   canManageStudents: boolean;
@@ -530,14 +537,18 @@ function RosterTable({
                           {initials}
                         </div>
                         <div className="min-w-0">
-                          <div className="text-sm font-medium truncate group-hover/name:text-emerald transition">{displayName}</div>
-                          <div className="text-[11px] text-muted-foreground mono truncate">{s.studentNumber}</div>
+                          <div className="text-sm font-medium truncate group-hover/name:text-emerald transition">
+                            <Highlight text={displayName} query={query} />
+                          </div>
+                          <div className="text-[11px] text-muted-foreground mono truncate">
+                            <Highlight text={s.studentNumber} query={query} />
+                          </div>
                         </div>
                       </button>
                     </td>
                     <td className="px-4 py-4 text-xs text-muted-foreground whitespace-nowrap">
                       Year {s.yearLevel}
-                      {s.section ? ` · ${s.section}` : ""}
+                      {s.section ? <> · <Highlight text={s.section} query={query} /></> : ""}
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex items-center gap-2">
@@ -1314,9 +1325,7 @@ function RecordPaymentModal({
     fees === null
       ? null
       : fees.filter((f) => {
-          if (!feeSearch.trim()) return true;
-          const q = feeSearch.trim().toLowerCase();
-          return f.feeName.toLowerCase().includes(q) || f.feeCategory.toLowerCase().includes(q);
+          return matchesSearch(feeSearch, f.feeName, f.feeCategory);
         });
 
   const pickFee = (f: StudentFeeStatusDto) => {
@@ -1374,8 +1383,9 @@ function RecordPaymentModal({
             value={feeSearch}
             onChange={(e) => setFeeSearch(e.target.value)}
             placeholder="Search fees…"
-            className="w-full bg-transparent border border-border/70 rounded-lg pl-9 pr-3 py-2 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-emerald/50 transition"
+            className="w-full bg-transparent border border-border/70 rounded-lg pl-9 pr-9 py-2 text-sm outline-none placeholder:text-muted-foreground/70 focus:border-emerald/50 transition"
           />
+          <SearchClearButton value={feeSearch} onClear={() => setFeeSearch("")} />
         </div>
         <div>
           <span className="eyebrow">Fee</span>
@@ -1385,7 +1395,7 @@ function RecordPaymentModal({
             ) : fees.length === 0 ? (
               <div className="text-xs text-muted-foreground">No fees apply to this student yet.</div>
             ) : visibleFees !== null && visibleFees.length === 0 ? (
-              <div className="text-xs text-muted-foreground">No fees match "{feeSearch}".</div>
+              <div className="text-xs text-muted-foreground">No fees match "{feeSearch.trim()}".</div>
             ) : (
               (visibleFees ?? []).map((f) => (
                 <button
@@ -1399,9 +1409,9 @@ function RecordPaymentModal({
                   )}
                 >
                   <div>
-                    <div className="text-sm font-medium">{f.feeName}</div>
+                    <div className="text-sm font-medium"><Highlight text={f.feeName} query={feeSearch} /></div>
                     <div className="mono text-[10px] text-muted-foreground mt-0.5">
-                      {f.feeCategory} · due {new Date(f.feeDueDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })}
+                      <Highlight text={f.feeCategory} query={feeSearch} /> · due {new Date(f.feeDueDate).toLocaleDateString("en-PH", { month: "short", day: "numeric" })}
                     </div>
                   </div>
                   <div className="text-right">

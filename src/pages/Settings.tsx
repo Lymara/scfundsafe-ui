@@ -23,6 +23,9 @@ import {
   Printer,
 } from "lucide-react";
 import { toast } from "sonner";
+import { SearchClearButton } from "@/components/search-clear";
+import { Highlight } from "@/components/highlight";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 import { PrintTable } from "@/components/print-table";
@@ -261,11 +264,7 @@ function MembersSection() {
 
   const filtered = useMemo(() => {
     if (!users) return [];
-    if (!q) return users;
-    const s = q.toLowerCase();
-    return users.filter(
-      (u) => u.fullName.toLowerCase().includes(s) || u.email.toLowerCase().includes(s) || u.role.toLowerCase().includes(s),
-    );
+    return users.filter((u) => matchesSearch(q, u.fullName, u.email, u.role, roleLabel(u.role)));
   }, [users, q]);
 
   const roleCounts = useMemo(() => {
@@ -304,8 +303,9 @@ function MembersSection() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search name, email, or role…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <span className="mono text-[10px] text-muted-foreground pr-3">{filtered.length} shown</span>
       </div>
@@ -348,7 +348,7 @@ function MembersSection() {
                     </div>
                     <div className="min-w-0">
                       <div className="text-sm font-medium truncate flex items-center gap-2">
-                        {u.fullName}
+                        <Highlight text={u.fullName} query={q} />
                         {self && (
                           <span className="mono text-[9px] text-emerald border border-emerald/30 rounded px-1.5 py-0.5">
                             YOU
@@ -369,10 +369,10 @@ function MembersSection() {
                         u.role === "Admin" ? "text-amber ring-amber/30 bg-amber/5" : "text-emerald ring-emerald/30 bg-emerald/5",
                       )}
                     >
-                      {roleLabel(u.role)}
+                      <Highlight text={roleLabel(u.role)} query={q} />
                     </span>
                   </div>
-                  <div className="text-xs mono text-muted-foreground truncate">{u.email}</div>
+                  <div className="text-xs mono text-muted-foreground truncate"><Highlight text={u.email} query={q} /></div>
                   <div className="flex gap-1 justify-end w-32">
                     <button
                       onClick={() => setResetTarget(u)}
@@ -647,7 +647,6 @@ function ActivitySection() {
 
   const results = useMemo(() => {
     if (!logs) return [];
-    const s = q.trim().toLowerCase();
     const fromDt = from ? new Date(`${from}T00:00:00`) : null;
     const toDt = to ? new Date(`${to}T23:59:59.999`) : null;
 
@@ -658,11 +657,7 @@ function ActivitySection() {
         if (fromDt && created < fromDt) return false;
         if (toDt && created > toDt) return false;
       }
-      if (s) {
-        const matches =
-          l.action.toLowerCase().includes(s) || l.userName.toLowerCase().includes(s) || (l.detail?.toLowerCase().includes(s) ?? false);
-        if (!matches) return false;
-      }
+      if (!matchesSearch(q, l.action, l.userName, l.detail)) return false;
       return true;
     });
   }, [logs, q, module, from, to]);
@@ -746,8 +741,9 @@ function ActivitySection() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search action, user, detail…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <div className="flex items-center gap-1 pl-2 border-l border-border/70">
           <DatePicker value={from} onChange={setFrom} dense placeholder="From" />
@@ -808,14 +804,14 @@ function ActivitySection() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium flex items-center gap-2 flex-wrap">
-                      {l.action}
-                      {l.detail && <span className="text-muted-foreground font-normal">· {l.detail}</span>}
+                      <Highlight text={l.action} query={q} />
+                      {l.detail && <span className="text-muted-foreground font-normal">· <Highlight text={l.detail} query={q} /></span>}
                       <span className="mono text-[9px] uppercase tracking-widest text-muted-foreground border border-border rounded px-1.5 py-0.5">
                         {activityModule(l.action)}
                       </span>
                     </div>
                     <div className="text-[11px] text-muted-foreground mono mt-1 flex items-center gap-2">
-                      <span>by {l.userName}</span>
+                      <span>by <Highlight text={l.userName} query={q} /></span>
                       <span className="opacity-50">·</span>
                       <span>#{String(results.length - ((page - 1) * DEFAULT_PAGE_SIZE + i)).padStart(3, "0")}</span>
                     </div>

@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { formatPHP } from "@/lib/auth-context";
 import { api, ApiError, type FundRecordDto, type FundRecordAttachmentDto } from "@/lib/api";
 import { Search, X, ArrowUpRight, ArrowDownRight, ImageOff, Loader2, Paperclip, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
+import { SearchClearButton } from "@/components/search-clear";
+import { Highlight } from "@/components/highlight";
+import { matchesSearch, searchTerms } from "@/lib/search";
 import { DatePicker } from "@/components/date-picker";
 import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
 
@@ -31,7 +34,9 @@ function RecordsView() {
     setLoading(true);
     try {
       const result = await api.searchRecords({
-        keyword: q || undefined,
+        // The server only matches one phrase, so send it the longest word and
+        // narrow down by every word below - this way spaces never break a search.
+        keyword: [...searchTerms(q)].sort((a, b) => b.length - a.length)[0] || undefined,
         dateFrom: from || undefined,
         dateTo: to || undefined,
         recordType: type === "all" ? undefined : type,
@@ -55,6 +60,11 @@ function RecordsView() {
   useEffect(() => {
     setPage(1);
   }, [q, type, origin, from, to]);
+
+  const visible = useMemo(
+    () => records.filter((t) => matchesSearch(q, t.purpose, t.source, t.notes, t.paymentMethod)),
+    [records, q],
+  );
 
   const clearFilters = () => {
     setQ("");
@@ -85,8 +95,9 @@ function RecordsView() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search purpose, source, notes…"
-            className="w-full bg-transparent pl-9 pr-3 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
+            className="w-full bg-transparent pl-9 pr-9 py-2.5 text-sm outline-none placeholder:text-muted-foreground/70"
           />
+          <SearchClearButton value={q} onClear={() => setQ("")} />
         </div>
         <div className="flex items-center gap-1 pl-2 border-l border-border/70">
           {(["all", "Income", "Expense"] as const).map((o) => (
@@ -141,14 +152,14 @@ function RecordsView() {
       </div>
 
       <div className="surface overflow-hidden">
-        {!loading && records.length === 0 ? (
+        {!loading && visible.length === 0 ? (
           <div className="p-14 text-center">
             <div className="mono text-xs text-muted-foreground">NO MATCHES</div>
             <div className="mt-2 text-sm text-muted-foreground">Try adjusting your filters.</div>
           </div>
         ) : (
           <div className="divide-y divide-border/70">
-            {paginate(records, page).map((t, i) => {
+            {paginate(visible, page).map((t, i) => {
               // Two independent kinds of photo a row can have: a single
               // reference photo from a student payment/refund, or one-to-many
               // receipt photos attached directly to a manually-recorded
@@ -179,7 +190,7 @@ function RecordsView() {
                   </div>
                   <div className="min-w-0">
                     <div className="text-sm font-medium truncate flex items-center gap-2">
-                      <span className="truncate">{t.purpose || t.source || "—"}</span>
+                      <span className="truncate">{t.purpose || t.source ? <Highlight text={t.purpose || t.source} query={q} /> : "—"}</span>
                       {t.isStudentPayment && (
                         <span className="mono text-[9px] uppercase tracking-widest px-1.5 py-0.5 rounded-full bg-emerald/10 text-emerald shrink-0">
                           Student
@@ -192,10 +203,11 @@ function RecordsView() {
                       )}
                     </div>
                     <div className="text-[11px] text-muted-foreground mono mt-0.5 truncate">
-                      {t.recordDate.slice(0, 10)} · {t.recordType === "Income" ? t.source ?? "Income" : "Expense"}
-                      {t.paymentMethod ? ` · via ${t.paymentMethod}` : ""}
+                      {t.recordDate.slice(0, 10)} ·{" "}
+                      {t.recordType === "Income" ? (t.source ? <Highlight text={t.source} query={q} /> : "Income") : "Expense"}
+                      {t.paymentMethod ? <> · via <Highlight text={t.paymentMethod} query={q} /></> : ""}
                       {t.reference ? ` · ${t.reference}` : ""}
-                      {t.notes ? ` · ${t.notes}` : ""}
+                      {t.notes ? <> · <Highlight text={t.notes} query={q} /></> : ""}
                       {t.createdByName ? ` · by ${t.createdByName}` : ""}
                     </div>
                   </div>
@@ -209,7 +221,7 @@ function RecordsView() {
           </div>
         )}
       </div>
-      {!loading && records.length > 0 && <Pagination page={page} totalItems={records.length} onPageChange={setPage} />}
+      {!loading && visible.length > 0 && <Pagination page={page} totalItems={visible.length} onPageChange={setPage} />}
 
       {viewingPhoto && <PhotoModal record={viewingPhoto} onClose={() => setViewingPhoto(null)} />}
     </div>
