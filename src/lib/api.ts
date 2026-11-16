@@ -331,6 +331,60 @@ export function clearSession() {
   localStorage.removeItem(USER_KEY);
 }
 
+/** Fired on `window` when the saved login is missing, expired or rejected by the server (401). */
+export const SESSION_EXPIRED_EVENT = "scfundsafe:session-expired";
+
+/** Reads the `exp` claim of a JWT. Returns true when the token is past its expiry time. */
+export function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" && payload.exp * 1000 <= Date.now();
+  } catch {
+    return false; // not a readable JWT - let the server decide
+  }
+}
+
+/** Milliseconds until the token expires, or null if it has no readable expiry. */
+export function tokenExpiresIn(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/")));
+    return typeof payload.exp === "number" ? payload.exp * 1000 - Date.now() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** True when there is a stored user AND a token that hasn't expired yet. */
+export function hasValidSession(): boolean {
+  const token = getToken();
+  return !!token && !!loadStoredUser() && !isTokenExpired(token);
+}
+
+/** Clears the saved login and tells the app to send the user back to the login page. */
+export function expireSession() {
+  clearSession();
+  window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+}
+
+// Requests where a 401 means "wrong email/password", not "session expired".
+const AUTH_PATHS = ["/auth/login", "/auth/register", "/auth/logout"];
+
+/**
+ * fetch() wrapper used for every API call. When the server answers 401 on a
+ * normal request, the session is cleared and the app redirects to /auth.
+ * The returned promise is left pending in that case, so pages don't also show
+ * their own "Request failed (401)" toast while the redirect happens.
+ */
+async function apiFetch(url: string, init: RequestInit = {}): Promise<Response> {
+  const res = await fetch(url, init);
+  const path = url.startsWith(API_BASE) ? url.slice(API_BASE.length) : url;
+  if (res.status === 401 && !AUTH_PATHS.some((p) => path.startsWith(p))) {
+    expireSession();
+    return new Promise<Response>(() => {});
+  }
+  return res;
+}
+
 export function loadStoredUser() {
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
@@ -357,7 +411,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const res = await apiFetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (res.status === 204) return undefined as T;
 
@@ -435,7 +489,7 @@ export const api = {
     const token = getToken();
     const form = new FormData();
     files.forEach((f) => form.append("files", f));
-    const res = await fetch(`${API_BASE}/records/${recordId}/attachments`, {
+    const res = await apiFetch(`${API_BASE}/records/${recordId}/attachments`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: form,
@@ -451,7 +505,7 @@ export const api = {
 
   fetchAttachmentBlob: async (attachmentId: number): Promise<Blob> => {
     const token = getToken();
-    const res = await fetch(`${API_BASE}/records/attachments/${attachmentId}`, {
+    const res = await apiFetch(`${API_BASE}/records/attachments/${attachmentId}`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     if (!res.ok) throw new ApiError("Couldn't load the photo.", res.status);
@@ -460,7 +514,7 @@ export const api = {
 
   deleteAttachment: async (attachmentId: number) => {
     const token = getToken();
-    const res = await fetch(`${API_BASE}/records/attachments/${attachmentId}`, {
+    const res = await apiFetch(`${API_BASE}/records/attachments/${attachmentId}`, {
       method: "DELETE",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
@@ -489,7 +543,7 @@ export const api = {
   // or changed from the Students page.
   fetchRecordReceiptBlob: async (recordId: number): Promise<Blob> => {
     const token = getToken();
-    const res = await fetch(`${API_BASE}/records/${recordId}/receipt`, {
+    const res = await apiFetch(`${API_BASE}/records/${recordId}/receipt`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     if (!res.ok) throw new ApiError("Couldn't load the receipt photo.", res.status);
@@ -559,7 +613,7 @@ export const api = {
     const token = getToken();
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${API_BASE}/students/import`, {
+    const res = await apiFetch(`${API_BASE}/students/import`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: form,
@@ -605,7 +659,7 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     if (reference) form.append("reference", reference);
-    const res = await fetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
+    const res = await apiFetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
       method: "POST",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       body: form,
@@ -619,7 +673,7 @@ export const api = {
 
   fetchReceiptBlob: async (paymentId: number): Promise<Blob> => {
     const token = getToken();
-    const res = await fetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
+    const res = await apiFetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
     if (!res.ok) throw new ApiError("Couldn't load the receipt photo.", res.status);
@@ -628,7 +682,7 @@ export const api = {
 
   deleteReceipt: async (paymentId: number) => {
     const token = getToken();
-    const res = await fetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
+    const res = await apiFetch(`${API_BASE}/students/payments/${paymentId}/receipt`, {
       method: "DELETE",
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });

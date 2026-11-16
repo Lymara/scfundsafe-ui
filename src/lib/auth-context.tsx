@@ -1,9 +1,15 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import {
   api,
   clearSession,
+  expireSession,
+  getToken,
+  hasValidSession,
   loadStoredUser,
   saveSession,
+  tokenExpiresIn,
+  SESSION_EXPIRED_EVENT,
   type Role,
 } from "@/lib/api";
 
@@ -34,9 +40,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setCurrentUser(loadStoredUser());
+    // Only restore the user if the saved token is still there and not expired;
+    // otherwise start logged out so the login page is shown.
+    if (hasValidSession()) {
+      setCurrentUser(loadStoredUser());
+    } else {
+      clearSession();
+      setCurrentUser(null);
+    }
     setHydrated(true);
   }, []);
+
+  // Session expired / rejected (401) anywhere in the app → log out and show a message.
+  useEffect(() => {
+    const onExpired = () => {
+      setCurrentUser((prev) => {
+        if (prev) toast.error("Your session has expired. Please sign in again.", { id: "session-expired" });
+        return null;
+      });
+    };
+    window.addEventListener(SESSION_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onExpired);
+  }, []);
+
+  // While logged in, re-check the session when the tab regains focus, when
+  // localStorage changes in another tab, and right when the token expires.
+  useEffect(() => {
+    if (!currentUser) return;
+    const check = () => {
+      if (!hasValidSession()) expireSession();
+    };
+    const onVisible = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    window.addEventListener("focus", check);
+    window.addEventListener("storage", check);
+    document.addEventListener("visibilitychange", onVisible);
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const token = getToken();
+    const ms = token ? tokenExpiresIn(token) : null;
+    // setTimeout can't take more than ~24.8 days; longer tokens are covered by the focus check.
+    if (ms !== null && ms < 2_147_483_647) timer = setTimeout(check, Math.max(ms, 0) + 1000);
+
+    return () => {
+      window.removeEventListener("focus", check);
+      window.removeEventListener("storage", check);
+      document.removeEventListener("visibilitychange", onVisible);
+      if (timer) clearTimeout(timer);
+    };
+  }, [currentUser]);
 
   const login: AuthContextValue["login"] = async (email, password) => {
     try {
