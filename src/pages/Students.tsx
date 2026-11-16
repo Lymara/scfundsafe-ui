@@ -1596,6 +1596,9 @@ function EditStudentModal({
   );
 }
 
+/** Digits, optionally separated by single dashes: "20260123", "2026-0123", "2026-01-23". */
+const STUDENT_NUMBER_PATTERN = /^\d+(-\d+)*$/;
+
 function AddStudentModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [studentNumber, setStudentNumber] = useState("");
   const [lastName, setLastName] = useState("");
@@ -1605,13 +1608,27 @@ function AddStudentModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const [section, setSection] = useState("");
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [studentNumberError, setStudentNumberError] = useState("");
 
   const preview = formatStudentName(lastName, firstName, middleInitial);
+
+  // Student numbers are digits with optional dashes (e.g. 2026-0123).
+  // Letters and other characters are blocked as they're typed or pasted.
+  const onStudentNumberChange = (raw: string) => {
+    const cleaned = raw.replace(/[^0-9-]/g, "");
+    setStudentNumber(cleaned);
+    setStudentNumberError(cleaned !== raw ? "Only numbers and dashes are allowed (e.g. 2026-0123)" : "");
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!studentNumber.trim() || !lastName.trim() || !firstName.trim())
       return toast.error("Student number, last name, and first name are required");
+    if (!STUDENT_NUMBER_PATTERN.test(studentNumber.trim())) {
+      const msg = "Student number must be numbers with optional dashes (e.g. 2026-0123)";
+      setStudentNumberError(msg);
+      return toast.error(msg);
+    }
 
     setSubmitting(true);
     try {
@@ -1634,9 +1651,36 @@ function AddStudentModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   return (
     <ModalShell title="Add student" subtitle="Enroll one student and set up their fee records." onClose={onClose}>
       <form onSubmit={submit} className="space-y-2" autoComplete="off">
-        <FloatField label="Student number" value={studentNumber}>
-          <input value={studentNumber} onChange={(e) => setStudentNumber(e.target.value)} placeholder="2026-0123" />
-        </FloatField>
+        <div>
+          <FloatField label="Student number" value={studentNumber}>
+            <input
+              value={studentNumber}
+              onChange={(e) => onStudentNumberChange(e.target.value)}
+              placeholder="2026-0123"
+              inputMode="numeric"
+              maxLength={20}
+              aria-invalid={!!studentNumberError}
+            />
+          </FloatField>
+          {studentNumberError && (
+            <p
+              role="alert"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "0.35rem",
+                marginTop: "0.4rem",
+                fontSize: "0.72rem",
+                lineHeight: 1.2,
+                fontWeight: 500,
+                color: "var(--destructive)",
+              }}
+            >
+              <AlertTriangle style={{ width: "0.8rem", height: "0.8rem", flexShrink: 0 }} />
+              {studentNumberError}
+            </p>
+          )}
+        </div>
         <div className="grid grid-cols-2 gap-x-6 gap-y-2">
           <FloatField label="Last name" value={lastName}>
             <input
