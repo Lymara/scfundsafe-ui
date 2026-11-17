@@ -14,6 +14,7 @@ import SettingsPage from "@/pages/Settings";
 import StudentsPage from "@/pages/Students";
 import PaymentsPage from "@/pages/Payments";
 import CalculatorPage from "@/pages/Calculator";
+import OverduePage from "@/pages/Overdue";
 
 function IndexRedirect() {
   const { currentUser, hydrated } = useAuth();
@@ -84,6 +85,14 @@ export default function App() {
           <Route path="/settings" element={<SettingsPage />} />
           <Route path="/students" element={<StudentsPage />} />
           <Route path="/payments" element={<PaymentsPage />} />
+          <Route
+            path="/overdue"
+            element={
+              <RoleRoute allowedRoles={["Treasurer"]}>
+                <OverduePage />
+              </RoleRoute>
+            }
+          />
           <Route path="/calculator" element={<CalculatorPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

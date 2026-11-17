@@ -16,6 +16,7 @@ import {
   Wallet,
   Calculator,
   ChevronDown,
+  AlarmClock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/api";
@@ -33,6 +34,7 @@ const navGroups: NavGroup[] = [
     items: [
       { to: "/students", label: "Roster", icon: GraduationCap },
       { to: "/payments", label: "Payments", icon: Receipt },
+      { to: "/overdue", label: "Overdue Fees", icon: AlarmClock, roles: ["Treasurer"] },
     ],
   },
   {

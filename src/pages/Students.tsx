@@ -1285,12 +1285,15 @@ function ReceiptPhoto({
   );
 }
 
-function RecordPaymentModal({
+export function RecordPaymentModal({
   student,
+  initialFeeId,
   onClose,
   onSaved,
 }: {
-  student: StudentDto;
+  student: Pick<StudentDto, "studentId" | "fullName" | "studentNumber" | "yearLevel">;
+  /** Fee to pre-select (e.g. from the Overdue Fees page). Defaults to the first unpaid fee. */
+  initialFeeId?: number;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -1310,13 +1313,15 @@ function RecordPaymentModal({
       .getStudentFees(student.studentId)
       .then((data) => {
         setFees(data);
-        const firstUnpaid = data.find((f) => f.status !== "Paid");
+        const preferred = initialFeeId ? data.find((f) => f.feeId === initialFeeId && f.status !== "Paid") : undefined;
+        const firstUnpaid = preferred ?? data.find((f) => f.status !== "Paid");
         if (firstUnpaid) {
           setFeeId(firstUnpaid.feeId);
           setAmount(String(firstUnpaid.balance));
         }
       })
       .catch((err) => toast.error(err instanceof Error ? err.message : "Failed to load fees"));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [student.studentId]);
 
   const selectedFee = fees?.find((f) => f.feeId === feeId) ?? null;
