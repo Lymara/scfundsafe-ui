@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { formatPHP } from "@/lib/auth-context";
-import { api, type FeeDto, type StudentFeeStatusDto } from "@/lib/api";
+import { api, type OverdueFeeDto, type StudentFeeStatusDto } from "@/lib/api";
 import { AlarmClock, CircleDashed, CircleDot, RefreshCw, Search, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { SearchClearButton } from "@/components/search-clear";
@@ -20,38 +20,17 @@ export default function OverduePage() {
   );
 }
 
-/** One student who still owes money on a fee whose due date has passed. */
-interface OverdueRow extends StudentFeeStatusDto {
-  daysOverdue: number;
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/** Local "today" at midnight, so a fee due today is not counted as overdue yet. */
-function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
+type OverdueRow = OverdueFeeDto;
 
 /** Due dates come from the API as ISO strings; only the date part matters. */
-function dueDateOf(iso: string): Date {
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function daysOverdue(iso: string): number {
-  return Math.round((startOfToday().getTime() - dueDateOf(iso).getTime()) / DAY_MS);
-}
-
 function formatDate(iso: string): string {
-  return dueDateOf(iso).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
 }
 
 type StatusFilter = "all" | "Unpaid" | "Partial";
 
 function OverdueView() {
-  const [fees, setFees] = useState<FeeDto[]>([]);
   const [rows, setRows] = useState<OverdueRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -63,20 +42,9 @@ function OverdueView() {
   const load = async () => {
     setLoading(true);
     try {
-      const allFees = await api.getFees(true);
-      const today = startOfToday();
-      // Only fees whose due date has passed and that still have someone with a balance.
-      const overdueFees = allFees.filter(
-        (f) => dueDateOf(f.dueDate) < today && f.partialCount + f.unpaidCount > 0,
-      );
-      const perFee = await Promise.all(overdueFees.map((f) => api.getStudentsForFee(f.feeId)));
-      const list: OverdueRow[] = perFee
-        .flat()
-        .filter((s) => s.balance > 0)
-        .map((s) => ({ ...s, daysOverdue: daysOverdue(s.feeDueDate) }))
-        .sort((a, b) => b.daysOverdue - a.daysOverdue || b.balance - a.balance);
-      setFees(overdueFees);
-      setRows(list);
+      // The server works out which fees are overdue, the balances and the days
+      // overdue, and returns them most overdue first.
+      setRows(await api.getOverdueFees());
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to load overdue fees");
     } finally {
@@ -94,6 +62,13 @@ function OverdueView() {
   useEffect(() => {
     setPage(1);
   }, [q, feeFilter, statusFilter]);
+
+  // One chip per overdue fee, taken from the rows the server returned.
+  const fees = useMemo(() => {
+    const map = new Map<number, string>();
+    rows.forEach((r) => map.set(r.feeId, r.feeName));
+    return [...map.entries()].map(([feeId, name]) => ({ feeId, name }));
+  }, [rows]);
 
   // If the selected fee is no longer overdue (all paid), fall back to "All fees".
   useEffect(() => {

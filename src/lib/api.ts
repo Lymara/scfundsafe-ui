@@ -306,6 +306,11 @@ export interface StudentFeeStatusDto {
   lastPaymentMethod?: PaymentMethod | null;
   paidAt?: string | null;
 }
+/** A student fee past its due date that still has a balance, from GET /fees/overdue. */
+export interface OverdueFeeDto extends StudentFeeStatusDto {
+  daysOverdue: number;
+}
+
 const TOKEN_KEY = "scfundsafe_token";
 const USER_KEY = "scfundsafe_user";
 
@@ -719,6 +724,15 @@ export const api = {
 
   getStudentsForFee: (feeId: number) =>
     request<StudentFeeStatusDto[]>(`/fees/${feeId}/students`),
+
+  /** Students with unpaid/partial balances on fees past their due date (Treasurer only). */
+  getOverdueFees: (params: { feeId?: number; yearLevel?: YearLevel } = {}) =>
+    request<OverdueFeeDto[]>(
+      `/fees/overdue${toQuery({
+        feeId: params.feeId ? String(params.feeId) : undefined,
+        yearLevel: params.yearLevel ? String(params.yearLevel) : undefined,
+      })}`,
+    ),
 
   // Fee categories (editable list for the dropdown)
   getFeeCategories: () => request<string[]>("/fees/categories"),
