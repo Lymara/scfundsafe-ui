@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { AppLayout } from "@/components/app-layout";
 import { formatPHP } from "@/lib/auth-context";
 import { api, type OverdueFeeDto, type StudentFeeStatusDto } from "@/lib/api";
-import { AlarmClock, CircleDashed, CircleDot, RefreshCw, Search, Wallet } from "lucide-react";
+import { AlarmClock, ChevronDown, CircleDashed, CircleDot, RefreshCw, Search, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { SearchClearButton } from "@/components/search-clear";
 import { Highlight } from "@/components/highlight";
@@ -30,6 +30,47 @@ function formatDate(iso: string): string {
 
 type StatusFilter = "all" | "Unpaid" | "Partial";
 
+/** One student with all of their overdue fees added together (used for "All fees"). */
+interface StudentGroup {
+  studentId: number;
+  fullName: string;
+  studentNumber: string;
+  yearLevel: OverdueRow["yearLevel"];
+  fees: OverdueRow[]; // most overdue first
+  amountDue: number;
+  amountPaid: number;
+  balance: number;
+  daysOverdue: number; // longest wait among their fees
+  earliestDue: string;
+  status: OverdueRow["status"];
+}
+
+function groupByStudent(list: OverdueRow[]): StudentGroup[] {
+  const map = new Map<number, OverdueRow[]>();
+  list.forEach((r) => map.set(r.studentId, [...(map.get(r.studentId) ?? []), r]));
+  return [...map.values()]
+    .map((fees) => {
+      const sorted = [...fees].sort((a, b) => b.daysOverdue - a.daysOverdue || b.balance - a.balance);
+      const first = sorted[0];
+      const amountPaid = sorted.reduce((s, f) => s + f.amountPaid, 0);
+      return {
+        studentId: first.studentId,
+        fullName: first.fullName,
+        studentNumber: first.studentNumber,
+        yearLevel: first.yearLevel,
+        fees: sorted,
+        amountDue: sorted.reduce((s, f) => s + f.amountDue, 0),
+        amountPaid,
+        balance: sorted.reduce((s, f) => s + f.balance, 0),
+        daysOverdue: first.daysOverdue,
+        earliestDue: first.feeDueDate,
+        // "Unpaid" only if nothing has been paid on any of their overdue fees.
+        status: amountPaid > 0 ? "Partial" : "Unpaid",
+      } as StudentGroup;
+    })
+    .sort((a, b) => b.daysOverdue - a.daysOverdue || b.balance - a.balance || a.fullName.localeCompare(b.fullName));
+}
+
 function OverdueView() {
   const [rows, setRows] = useState<OverdueRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,6 +79,15 @@ function OverdueView() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [collecting, setCollecting] = useState<OverdueRow | null>(null);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const toggleExpanded = (studentId: number) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(studentId)) next.delete(studentId);
+      else next.add(studentId);
+      return next;
+    });
 
   const load = async () => {
     setLoading(true);
@@ -85,6 +135,11 @@ function OverdueView() {
       ),
     [rows, q, feeFilter, statusFilter],
   );
+
+  // "All fees" → one row per student with their total; a single fee → one row per fee.
+  const grouped = feeFilter === "all";
+  const groups = useMemo(() => groupByStudent(visible), [visible]);
+  const listLength = grouped ? groups.length : visible.length;
 
   const totalOutstanding = visible.reduce((sum, r) => sum + r.balance, 0);
   const studentCount = new Set(visible.map((r) => r.studentId)).size;
@@ -171,11 +226,11 @@ function OverdueView() {
               <tr className="eyebrow text-left hairline-b">
                 <th className="px-5 py-3 font-semibold w-10">#</th>
                 <th className="px-4 py-3 font-semibold">Student</th>
-                <th className="px-4 py-3 font-semibold">Fee</th>
-                <th className="px-4 py-3 font-semibold">Due date</th>
+                <th className="px-4 py-3 font-semibold">{grouped ? "Fees" : "Fee"}</th>
+                <th className="px-4 py-3 font-semibold">{grouped ? "Earliest due" : "Due date"}</th>
                 <th className="px-4 py-3 font-semibold">Overdue</th>
                 <th className="px-4 py-3 font-semibold text-right">Paid</th>
-                <th className="px-4 py-3 font-semibold text-right">Balance</th>
+                <th className="px-4 py-3 font-semibold text-right">{grouped ? "Total balance" : "Balance"}</th>
                 <th className="px-4 py-3 font-semibold">Status</th>
                 <th className="px-5 py-3 font-semibold text-right">Action</th>
               </tr>
@@ -187,7 +242,7 @@ function OverdueView() {
                     LOADING…
                   </td>
                 </tr>
-              ) : visible.length === 0 ? (
+              ) : listLength === 0 ? (
                 <tr>
                   <td colSpan={9} className="p-14 text-center">
                     <div className="mono text-xs text-muted-foreground">
@@ -200,6 +255,99 @@ function OverdueView() {
                     </div>
                   </td>
                 </tr>
+              ) : grouped ? (
+                paginate(groups, page).map((g, i) => {
+                  const open = expanded.has(g.studentId);
+                  return (
+                    <Fragment key={g.studentId}>
+                      <tr
+                        onClick={() => toggleExpanded(g.studentId)}
+                        className="hover:bg-muted/40 transition cursor-pointer"
+                        title={open ? "Hide fee breakdown" : "Show fee breakdown"}
+                      >
+                        <td className="px-5 py-4 mono text-[10px] text-muted-foreground">
+                          {String((page - 1) * DEFAULT_PAGE_SIZE + i + 1).padStart(2, "0")}
+                        </td>
+                        <td className="px-4 py-4">
+                          <div className="font-medium flex items-center gap-1.5">
+                            <ChevronDown
+                              className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")}
+                            />
+                            <Highlight text={toTitleCase(g.fullName)} query={q} />
+                          </div>
+                          <div className="mono text-[10px] text-muted-foreground pl-5">
+                            <Highlight text={g.studentNumber} query={q} /> · Year {g.yearLevel}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 max-w-[220px]">
+                          <div>
+                            {g.fees.length} fee{g.fees.length === 1 ? "" : "s"}
+                          </div>
+                          <div className="mono text-[10px] text-muted-foreground truncate">
+                            {g.fees.map((f, idx) => (
+                              <Fragment key={f.feeId}>
+                                {idx > 0 && ", "}
+                                <Highlight text={f.feeName} query={q} />
+                              </Fragment>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4 mono text-xs whitespace-nowrap">{formatDate(g.earliestDue)}</td>
+                        <td className="px-4 py-4 whitespace-nowrap">
+                          <OverdueBadge days={g.daysOverdue} />
+                        </td>
+                        <td className="px-4 py-4 mono text-xs text-right whitespace-nowrap">
+                          {formatPHP(g.amountPaid)}
+                          <span className="text-muted-foreground"> / {formatPHP(g.amountDue)}</span>
+                        </td>
+                        <td className="px-4 py-4 mono text-xs text-right text-destructive whitespace-nowrap font-semibold">
+                          {formatPHP(g.balance)}
+                        </td>
+                        <td className="px-4 py-4">
+                          <StatusPill status={g.status} />
+                        </td>
+                        <td className="px-5 py-4 text-right">
+                          <CollectButton
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setCollecting(g.fees[0]); // starts on their most overdue fee
+                            }}
+                          />
+                        </td>
+                      </tr>
+                      {open &&
+                        g.fees.map((f) => (
+                          <tr key={`${g.studentId}-${f.feeId}`} className="bg-muted/20">
+                            <td />
+                            <td className="px-4 py-2.5 mono text-[10px] text-muted-foreground pl-9">└ fee</td>
+                            <td className="px-4 py-2.5">
+                              <div className="text-xs">
+                                <Highlight text={f.feeName} query={q} />
+                              </div>
+                              <div className="mono text-[10px] text-muted-foreground">{f.feeCategory}</div>
+                            </td>
+                            <td className="px-4 py-2.5 mono text-xs whitespace-nowrap">{formatDate(f.feeDueDate)}</td>
+                            <td className="px-4 py-2.5 whitespace-nowrap">
+                              <OverdueBadge days={f.daysOverdue} />
+                            </td>
+                            <td className="px-4 py-2.5 mono text-xs text-right whitespace-nowrap">
+                              {formatPHP(f.amountPaid)}
+                              <span className="text-muted-foreground"> / {formatPHP(f.amountDue)}</span>
+                            </td>
+                            <td className="px-4 py-2.5 mono text-xs text-right text-destructive whitespace-nowrap">
+                              {formatPHP(f.balance)}
+                            </td>
+                            <td className="px-4 py-2.5">
+                              <StatusPill status={f.status} />
+                            </td>
+                            <td className="px-5 py-2.5 text-right">
+                              <CollectButton onClick={() => setCollecting(f)} />
+                            </td>
+                          </tr>
+                        ))}
+                    </Fragment>
+                  );
+                })
               ) : (
                 paginate(visible, page).map((r, i) => (
                   <tr key={`${r.studentId}-${r.feeId}`} className="hover:bg-muted/40 transition">
@@ -235,13 +383,7 @@ function OverdueView() {
                       <StatusPill status={r.status} />
                     </td>
                     <td className="px-5 py-4 text-right">
-                      <button
-                        onClick={() => setCollecting(r)}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-emerald hover:bg-emerald/10 transition"
-                        title="Record a payment for this fee"
-                      >
-                        <Wallet className="h-3.5 w-3.5" /> Collect
-                      </button>
+                      <CollectButton onClick={() => setCollecting(r)} />
                     </td>
                   </tr>
                 ))
@@ -249,8 +391,8 @@ function OverdueView() {
             </tbody>
           </table>
         </div>
-        {!loading && visible.length > 0 && (
-          <Pagination page={page} totalItems={visible.length} onPageChange={setPage} />
+        {!loading && listLength > 0 && (
+          <Pagination page={page} totalItems={listLength} onPageChange={setPage} />
         )}
       </div>
 
@@ -271,6 +413,18 @@ function OverdueView() {
         />
       )}
     </div>
+  );
+}
+
+function CollectButton({ onClick }: { onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs text-emerald hover:bg-emerald/10 transition"
+      title="Record a payment"
+    >
+      <Wallet className="h-3.5 w-3.5" /> Collect
+    </button>
   );
 }
 
