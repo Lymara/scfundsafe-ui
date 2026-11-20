@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { AppLayout } from "@/components/app-layout";
 import { formatPHP } from "@/lib/auth-context";
 import { api, type OverdueFeeDto, type StudentFeeStatusDto } from "@/lib/api";
@@ -279,18 +280,8 @@ function OverdueView() {
                             <Highlight text={g.studentNumber} query={q} /> · Year {g.yearLevel}
                           </div>
                         </td>
-                        <td className="px-4 py-4 max-w-[220px]">
-                          <div>
-                            {g.fees.length} fee{g.fees.length === 1 ? "" : "s"}
-                          </div>
-                          <div className="mono text-[10px] text-muted-foreground truncate">
-                            {g.fees.map((f, idx) => (
-                              <Fragment key={f.feeId}>
-                                {idx > 0 && ", "}
-                                <Highlight text={f.feeName} query={q} />
-                              </Fragment>
-                            ))}
-                          </div>
+                        <td className="px-4 py-4">
+                          <FeesHover fees={g.fees} query={q} />
                         </td>
                         <td className="px-4 py-4 mono text-xs whitespace-nowrap">{formatDate(g.earliestDue)}</td>
                         <td className="px-4 py-4 whitespace-nowrap">
@@ -413,6 +404,57 @@ function OverdueView() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * "4 fees" label that shows the fee names in a small popup on hover.
+ * The popup is rendered into <body> with fixed positioning so the table's
+ * scroll container can't clip it.
+ */
+function FeesHover({ fees, query }: { fees: OverdueRow[]; query: string }) {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+
+  const show = (e: React.MouseEvent<HTMLElement> | React.FocusEvent<HTMLElement>) => {
+    const r = e.currentTarget.getBoundingClientRect();
+    setPos({ top: r.bottom + 6, left: r.left });
+  };
+  const hide = () => setPos(null);
+
+  return (
+    <>
+      <span
+        tabIndex={0}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={show}
+        onBlur={hide}
+        className="cursor-help underline decoration-dotted decoration-muted-foreground/60 underline-offset-4 outline-none"
+      >
+        {fees.length} fee{fees.length === 1 ? "" : "s"}
+      </span>
+      {pos &&
+        createPortal(
+          <div
+            role="tooltip"
+            className="fixed z-[120] min-w-[200px] max-w-xs rounded-lg border border-border bg-popover/95 backdrop-blur-md px-3 py-2.5 shadow-xl animate-fade-in pointer-events-none"
+            style={{ top: pos.top, left: pos.left, background: "var(--popover, var(--card))" }}
+          >
+            <div className="eyebrow mb-1.5">Overdue fees</div>
+            <ul className="space-y-1">
+              {fees.map((f) => (
+                <li key={f.feeId} className="flex items-center justify-between gap-4 text-xs">
+                  <span className="truncate">
+                    <Highlight text={f.feeName} query={query} />
+                  </span>
+                  <span className="mono text-destructive shrink-0">{formatPHP(f.balance)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 
