@@ -9,7 +9,7 @@ import { SearchClearButton } from "@/components/search-clear";
 import { Highlight } from "@/components/highlight";
 import { matchesSearch } from "@/lib/search";
 import { cn, toTitleCase } from "@/lib/utils";
-import { Pagination, paginate, DEFAULT_PAGE_SIZE } from "@/components/pagination";
+import { Pagination, paginate } from "@/components/pagination";
 import { onRecordsChanged } from "@/lib/events";
 import { RecordPaymentModal } from "@/pages/Students";
 
@@ -225,8 +225,7 @@ function OverdueView() {
           <table className="w-full text-sm">
             <thead>
               <tr className="eyebrow text-left hairline-b">
-                <th className="px-5 py-3 font-semibold w-10">#</th>
-                <th className="px-4 py-3 font-semibold">Student</th>
+                <th className="px-5 py-3 font-semibold">Student</th>
                 <th className="px-4 py-3 font-semibold">{grouped ? "Fees" : "Fee"}</th>
                 <th className="px-4 py-3 font-semibold">{grouped ? "Earliest due" : "Due date"}</th>
                 <th className="px-4 py-3 font-semibold">Overdue</th>
@@ -239,13 +238,13 @@ function OverdueView() {
             <tbody className="divide-y divide-border/70">
               {loading ? (
                 <tr>
-                  <td colSpan={9} className="p-14 text-center mono text-xs text-muted-foreground">
+                  <td colSpan={8} className="p-14 text-center mono text-xs text-muted-foreground">
                     LOADING…
                   </td>
                 </tr>
               ) : listLength === 0 ? (
                 <tr>
-                  <td colSpan={9} className="p-14 text-center">
+                  <td colSpan={8} className="p-14 text-center">
                     <div className="mono text-xs text-muted-foreground">
                       {rows.length === 0 ? "NO OVERDUE FEES" : "NO MATCHES"}
                     </div>
@@ -257,7 +256,7 @@ function OverdueView() {
                   </td>
                 </tr>
               ) : grouped ? (
-                paginate(groups, page).map((g, i) => {
+                paginate(groups, page).map((g) => {
                   const open = expanded.has(g.studentId);
                   return (
                     <Fragment key={g.studentId}>
@@ -266,10 +265,7 @@ function OverdueView() {
                         className="hover:bg-muted/40 transition cursor-pointer"
                         title={open ? "Hide fee breakdown" : "Show fee breakdown"}
                       >
-                        <td className="px-5 py-4 mono text-[10px] text-muted-foreground">
-                          {String((page - 1) * DEFAULT_PAGE_SIZE + i + 1).padStart(2, "0")}
-                        </td>
-                        <td className="px-4 py-4">
+                        <td className="px-5 py-4">
                           <div className="font-medium flex items-center gap-1.5">
                             <ChevronDown
                               className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", !open && "-rotate-90")}
@@ -309,8 +305,7 @@ function OverdueView() {
                       {open &&
                         g.fees.map((f) => (
                           <tr key={`${g.studentId}-${f.feeId}`} className="bg-muted/20">
-                            <td />
-                            <td className="px-4 py-2.5 mono text-[10px] text-muted-foreground pl-9">└ fee</td>
+                            <td className="px-5 py-2.5 mono text-[10px] text-muted-foreground pl-10">└ fee</td>
                             <td className="px-4 py-2.5">
                               <div className="text-xs">
                                 <Highlight text={f.feeName} query={q} />
@@ -340,12 +335,9 @@ function OverdueView() {
                   );
                 })
               ) : (
-                paginate(visible, page).map((r, i) => (
+                paginate(visible, page).map((r) => (
                   <tr key={`${r.studentId}-${r.feeId}`} className="hover:bg-muted/40 transition">
-                    <td className="px-5 py-4 mono text-[10px] text-muted-foreground">
-                      {String((page - 1) * DEFAULT_PAGE_SIZE + i + 1).padStart(2, "0")}
-                    </td>
-                    <td className="px-4 py-4">
+                    <td className="px-5 py-4">
                       <div className="font-medium">
                         <Highlight text={toTitleCase(r.fullName)} query={q} />
                       </div>
